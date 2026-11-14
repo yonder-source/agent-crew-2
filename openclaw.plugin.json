@@ -1,0 +1,17 @@
+{
+  "id": "agent-crew",
+  "name": "Agent Crew",
+  "description": "Agent Crew status and session metadata integration",
+  "version": "0.1.0",
+  "kind": "plugin",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["environment"],
+    "properties": {
+      "environment": { "type": "string", "minLength": 1 }
+    }
+  },
+  "contracts": { "tools": ["agent_crew_status"] },
+  "activation": { "onStartup": true }
+}

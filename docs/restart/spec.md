@@ -81,6 +81,10 @@ Target a cloud VM with Docker for the first production deployment. Validate
 locally before cloud deployment. The selected runtime version and image digest
 must be recorded and checked against the APIs used by the implementation.
 
+The WBS1 foundation pins OpenClaw `2026.11.3` and its matching plugin SDK.
+The [developer handoff](../../README.md) records the image digest, toolchain
+versions and Docker build and integration-check commands.
+
 ## Later scope
 
 Slack approval that causes the Designer agent to label an issue, automatic

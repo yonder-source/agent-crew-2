@@ -1,0 +1,7 @@
+.git
+.github
+node_modules
+dist
+.openclaw
+project-memory.md
+openclaw.json.last-good
