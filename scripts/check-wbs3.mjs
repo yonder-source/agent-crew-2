@@ -77,6 +77,48 @@ await assert.rejects(rejectedWriteProvider.updateIssueBody("owner/repo", 7, "Cha
   error instanceof GitHubIssueError && error.code === "GITHUB_REQUEST_REJECTED",
   "A definitive GitHub 4xx response must not be treated as an uncertain write");
 
+let stalledRequestSignal;
+const timeoutProvider = new OctokitGitHubIssueProvider({
+  getInstallationToken: async () => "fixture-installation-token",
+  timeoutMs: 100,
+  fetcher: async (_input, init) => {
+    stalledRequestSignal = init.signal;
+    return new Promise(() => {});
+  },
+});
+await assert.rejects(timeoutProvider.readIssue("owner/repo", 7), (error) =>
+  error instanceof GitHubIssueError && error.code === "GITHUB_REQUEST_TIMEOUT");
+assert.equal(stalledRequestSignal.aborted, true, "The request timeout must abort the underlying fetch");
+
+let stalledBodySignal;
+const bodyTimeoutProvider = new OctokitGitHubIssueProvider({
+  getInstallationToken: async () => "fixture-installation-token",
+  timeoutMs: 100,
+  fetcher: async (_input, init) => {
+    stalledBodySignal = init.signal;
+    return new Response(new ReadableStream({ start() {} }), { status: 200 });
+  },
+});
+await assert.rejects(bodyTimeoutProvider.readIssue("owner/repo", 7), (error) =>
+  error instanceof GitHubIssueError && error.code === "GITHUB_REQUEST_TIMEOUT");
+assert.equal(stalledBodySignal.aborted, true, "The request deadline must cover response body reads too");
+
+const maliciousNextPage = "https://api.github.com/repos/owner/repoXname/issues?page=2";
+let scopedRequestCount = 0;
+const scopedProvider = new OctokitGitHubIssueProvider({
+  getInstallationToken: async () => "fixture-installation-token",
+  fetcher: async () => {
+    scopedRequestCount += 1;
+    return jsonResponse([], {
+      status: 200,
+      headers: { link: `<${maliciousNextPage}>; rel="next"` },
+    });
+  },
+});
+await assert.rejects(scopedProvider.listReadyIssues("owner/repo.name"), (error) =>
+  error instanceof GitHubIssueError && error.code === "GITHUB_REQUEST_BLOCKED");
+assert.equal(scopedRequestCount, 1, "Pagination must not escape the configured repository path");
+
 let complete;
 let failure;
 const emptyDiscovery = new IssueDiscovery({

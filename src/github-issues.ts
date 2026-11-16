@@ -67,25 +67,40 @@ function parseIssue(value: unknown, repository: string): GitHubIssue & { isPullR
 
 function requestPathAllowed(repositoryPath: string, url: URL, method: string): boolean {
   if (url.origin !== "https://api.github.com" || url.username || url.password || url.hash) return false;
-  if (url.pathname === `${repositoryPath}/issues`) return method === "GET";
-  return new RegExp(`^${repositoryPath}/issues/[1-9][0-9]*$`).test(url.pathname) &&
+  const path = url.pathname.split("/");
+  const repository = repositoryPath.split("/").filter(Boolean);
+  const prefix = ["", ...repository.map((part) => part.toLowerCase()), "issues"];
+  if (path.length === prefix.length && path.map((part) => part.toLowerCase()).join("/") === prefix.join("/")) {
+    return method === "GET";
+  }
+  return path.length === prefix.length + 1 &&
+    path.slice(0, prefix.length).map((part) => part.toLowerCase()).join("/") === prefix.join("/") &&
+    /^[1-9][0-9]*$/.test(path[prefix.length] ?? "") &&
     (method === "GET" || method === "PATCH");
 }
 
-async function readBoundedResponse(response: Response, maximumBytes: number): Promise<Response> {
+async function readBoundedResponse(response: Response, maximumBytes: number, signal?: AbortSignal): Promise<Response> {
   if (response.body === null) return response;
   const reader = response.body.getReader();
+  const cancelOnAbort = () => { void reader.cancel(signal?.reason).catch(() => {}); };
+  if (signal?.aborted) cancelOnAbort();
+  else signal?.addEventListener("abort", cancelOnAbort, { once: true });
   const chunks: Uint8Array[] = [];
   let size = 0;
-  while (true) {
-    const part = await reader.read();
-    if (part.done) break;
-    size += part.value.byteLength;
-    if (size > maximumBytes) {
-      await reader.cancel();
-      throw new GitHubIssueError("GITHUB_RESPONSE_TOO_LARGE", "GitHub response exceeded the configured size limit.");
+  try {
+    while (true) {
+      const part = await reader.read();
+      if (part.done) break;
+      size += part.value.byteLength;
+      if (size > maximumBytes) {
+        void reader.cancel().catch(() => {});
+        throw new GitHubIssueError("GITHUB_RESPONSE_TOO_LARGE", "GitHub response exceeded the configured size limit.");
+      }
+      chunks.push(part.value);
     }
-    chunks.push(part.value);
+  } finally {
+    signal?.removeEventListener("abort", cancelOnAbort);
+    reader.releaseLock();
   }
   const body = new Uint8Array(size);
   let offset = 0;
@@ -115,8 +130,15 @@ export class OctokitGitHubIssueProvider {
 
   async listReadyIssues(repository: string): Promise<GitHubIssue[]> {
     const target = parseRepository(repository);
+    const requestState: { timedOut: boolean; guardFailure?: unknown } = { timedOut: false };
     try {
-      const octokit = await this.client(target);
+      const octokit = await this.client(
+        target,
+        undefined,
+        (error) => { requestState.guardFailure = error; },
+        undefined,
+        () => { requestState.timedOut = true; },
+      );
       const issues: GitHubIssue[] = [];
       let pages = 0;
       for await (const page of octokit.paginate.iterator(octokit.rest.issues.listForRepo, {
@@ -140,6 +162,10 @@ export class OctokitGitHubIssueProvider {
       }
       return issues;
     } catch (error) {
+      if (requestState.guardFailure !== undefined) throw requestState.guardFailure;
+      if (requestState.timedOut) {
+        throw new GitHubIssueError("GITHUB_REQUEST_TIMEOUT", "GitHub issue request exceeded its time limit.");
+      }
       throw this.safeError(error, "GITHUB_DISCOVERY_FAILED");
     }
   }
@@ -147,8 +173,15 @@ export class OctokitGitHubIssueProvider {
   async readIssue(repository: string, number: number): Promise<GitHubIssue> {
     const target = parseRepository(repository);
     this.validateIssueNumber(number);
+    const requestState: { timedOut: boolean; guardFailure?: unknown } = { timedOut: false };
     try {
-      const octokit = await this.client(target);
+      const octokit = await this.client(
+        target,
+        undefined,
+        (error) => { requestState.guardFailure = error; },
+        undefined,
+        () => { requestState.timedOut = true; },
+      );
       const { data } = await octokit.rest.issues.get({ owner: target.owner, repo: target.name, issue_number: number });
       const issue = parseIssue(data, target.fullName);
       if (issue.isPullRequest || issue.number !== number) {
@@ -157,6 +190,10 @@ export class OctokitGitHubIssueProvider {
       const { isPullRequest: _pullRequest, ...publicIssue } = issue;
       return publicIssue;
     } catch (error) {
+      if (requestState.guardFailure !== undefined) throw requestState.guardFailure;
+      if (requestState.timedOut) {
+        throw new GitHubIssueError("GITHUB_REQUEST_TIMEOUT", "GitHub issue request exceeded its time limit.");
+      }
       throw this.safeError(error, "GITHUB_READ_FAILED");
     }
   }
@@ -172,14 +209,18 @@ export class OctokitGitHubIssueProvider {
     if (typeof body !== "string" || body.length > 64_000) {
       throw new GitHubIssueError("GITHUB_BODY_INVALID", "Issue body must be text no longer than 64 KB.");
     }
-    const requestState: { started: boolean; guardFailure?: unknown } = { started: false };
+    const requestState: { started: boolean; timedOut: boolean; guardFailure?: unknown } = {
+      started: false,
+      timedOut: false,
+    };
     try {
       const octokit = await this.client(target, (url, method) => {
         beforeDispatch?.();
         if (!requestPathAllowed(target.path, url, method)) {
           throw new GitHubIssueError("GITHUB_REQUEST_BLOCKED", "GitHub request was outside the configured repository issue API.");
         }
-      }, (error) => { requestState.guardFailure = error; }, () => { requestState.started = true; });
+      }, (error) => { requestState.guardFailure = error; }, () => { requestState.started = true; },
+      () => { requestState.timedOut = true; });
       const { data } = await octokit.rest.issues.update({
         owner: target.owner,
         repo: target.name,
@@ -194,6 +235,9 @@ export class OctokitGitHubIssueProvider {
       return publicIssue;
     } catch (error) {
       if (requestState.guardFailure !== undefined) throw requestState.guardFailure;
+      if (requestState.timedOut) {
+        throw new GitHubIssueError("GITHUB_WRITE_UNCERTAIN", "GitHub issue update outcome is uncertain; inspect the issue before retrying.");
+      }
       const status = error && typeof error === "object" ? (error as { status?: unknown }).status : undefined;
       if (requestState.started && !(typeof status === "number" && status >= 400 && status < 500)) {
         throw new GitHubIssueError("GITHUB_WRITE_UNCERTAIN", "GitHub issue update outcome is uncertain; inspect the issue before retrying.");
@@ -207,6 +251,7 @@ export class OctokitGitHubIssueProvider {
     beforeDispatch?: (url: URL, method: string) => void,
     onGuardFailure?: (error: unknown) => void,
     onRequestStart?: () => void,
+    onTimeout?: () => void,
   ): Promise<Octokit> {
     let token: string;
     try {
@@ -220,7 +265,9 @@ export class OctokitGitHubIssueProvider {
       const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
       const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
       if (!requestPathAllowed(target.path, url, method)) {
-        throw new GitHubIssueError("GITHUB_REQUEST_BLOCKED", "GitHub request was outside the configured repository issue API.");
+        const error = new GitHubIssueError("GITHUB_REQUEST_BLOCKED", "GitHub request was outside the configured repository issue API.");
+        onGuardFailure?.(error);
+        throw error;
       }
       try {
         beforeDispatch?.(url, method);
@@ -229,8 +276,32 @@ export class OctokitGitHubIssueProvider {
         throw error;
       }
       onRequestStart?.();
-      const response = await fetcher(input, { ...init, redirect: "error", cache: "no-store" });
-      return readBoundedResponse(response, this.maximumResponseBytes);
+      const controller = new AbortController();
+      const externalSignal = init?.signal;
+      const abortFromCaller = () => controller.abort(externalSignal?.reason);
+      if (externalSignal?.aborted) abortFromCaller();
+      else externalSignal?.addEventListener("abort", abortFromCaller, { once: true });
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const deadline = new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          onTimeout?.();
+          controller.abort(new DOMException("GitHub request timed out.", "TimeoutError"));
+          reject(new GitHubIssueError("GITHUB_REQUEST_TIMEOUT", "GitHub issue request exceeded its time limit."));
+        }, this.timeoutMs);
+      });
+      try {
+        const response = await Promise.race([
+          (async () => {
+            const result = await fetcher(input, { ...init, signal: controller.signal, redirect: "error", cache: "no-store" });
+            return readBoundedResponse(result, this.maximumResponseBytes, controller.signal);
+          })(),
+          deadline,
+        ]);
+        return response;
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+        externalSignal?.removeEventListener("abort", abortFromCaller);
+      }
     };
     return new Octokit({
       auth: token,

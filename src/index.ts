@@ -68,6 +68,8 @@ export default definePluginEntry({
     const config = parseConfig(api.pluginConfig);
     const bootId = randomUUID();
     let queue = Promise.resolve();
+    let issueUpdateQueue = Promise.resolve();
+    let metadataQueue = Promise.resolve();
     api.session.state.registerSessionExtension({ namespace: NAMESPACE, description: "Issue admission and workflow status" });
     // Explicit operator credential: use the authenticated public API, not the
     // trusted-plugin-only in-process gateway.request capability.
@@ -104,6 +106,24 @@ export default definePluginEntry({
     const serialize = <T>(operation: () => Promise<T>): Promise<T> => {
       const result = queue.then(operation, operation);
       queue = result.then(() => undefined, () => undefined);
+      return result;
+    };
+
+    const serializeIssueUpdate = <T>(operation: () => Promise<T>): Promise<T> => {
+      const result = issueUpdateQueue.then(operation, operation);
+      issueUpdateQueue = result.then(() => undefined, () => undefined);
+      return result;
+    };
+
+    const patchJob = (issue: Issue, update: (job: Job) => Job): Promise<Job> => {
+      const result = metadataQueue.then(async () => {
+        const current = await readJob(issue);
+        if (!current) throw new Error("Issue admission metadata is missing; operator inspection is required");
+        const updated = update(current);
+        await writeJob(issue, updated);
+        return updated;
+      });
+      metadataQueue = result.then(() => undefined, () => undefined);
       return result;
     };
 
@@ -167,23 +187,21 @@ export default definePluginEntry({
           throw new Error("Lobster did not return a recognized successful response; inspect the Gateway workflow logs");
         }
         const continuation = (workflow.requiresApproval ?? workflow.requiresInput) as { resumeToken?: string } | null;
-        const completed: Job = {
-          ...job,
+        const completed = await patchJob(issue, (current) => ({
+          ...current,
           status: workflow.status === "ok" ? "completed" : workflow.status === "cancelled" ? "needs-inspection" : "active",
           workflowStatus: String(workflow.status),
           ...(typeof continuation?.resumeToken === "string" ? { workflowRef: continuation.resumeToken } : {}),
           updatedAt: new Date().toISOString(),
-        };
-        await writeJob(issue, completed);
+        }));
         return completed;
       } catch (error) {
-        const uncertain: Job = {
-          ...job,
+        const uncertain = await patchJob(issue, (current) => ({
+          ...current,
           status: "needs-inspection",
           error: error instanceof Error ? error.message : "workflow invocation failed",
           updatedAt: new Date().toISOString(),
-        };
-        await writeJob(issue, uncertain);
+        }));
         return uncertain;
       }
     });
@@ -228,23 +246,24 @@ export default definePluginEntry({
           if (typeof values.note !== "string" || values.note.trim() === "") throw new Error("resolution requires an inspection note");
           const note = values.note;
           const issue = parseIssue(values.repository, values.issueNumber);
-          const updated = await serialize(async () => {
-            const existing = await readJob(issue);
-            if (values.target === "issue-update") {
-              if (!existing?.issueUpdate || existing.issueUpdate.status !== "needs-inspection" ||
+          const updated = values.target === "issue-update"
+            ? await patchJob(issue, (existing) => {
+              if (!existing.issueUpdate || existing.issueUpdate.status !== "needs-inspection" ||
                   !["confirm", "retry", "abandon"].includes(String(values.decision))) {
                 throw new Error("issue update is not awaiting a valid operator decision");
               }
-              const issueUpdate: NonNullable<Job["issueUpdate"]> = {
-                ...existing.issueUpdate,
-                status: values.decision === "confirm" ? "confirmed" : values.decision === "retry" ? "retry-approved" : "abandoned",
-                decision: `${String(values.decision)}: ${note}`,
-                updatedAt: new Date().toISOString(),
+              return {
+                ...existing,
+                issueUpdate: {
+                  ...existing.issueUpdate,
+                  status: values.decision === "confirm" ? "confirmed" : values.decision === "retry" ? "retry-approved" : "abandoned",
+                  decision: `${String(values.decision)}: ${note}`,
+                  updatedAt: new Date().toISOString(),
+                },
               };
-              const next = { ...existing, issueUpdate };
-              await writeJob(issue, next);
-              return next;
-            }
+            })
+            : await serialize(async () => {
+            const existing = await readJob(issue);
             if (values.target !== undefined && values.target !== "workflow") throw new Error("target must be workflow or issue-update");
             if ((values.decision !== "retry" && values.decision !== "abandon") || !existing || existing.status !== "needs-inspection") {
               throw new Error("workflow is not awaiting a valid operator decision");
@@ -339,21 +358,26 @@ export default definePluginEntry({
             parameters: Type.Object({ body: Type.String({ maxLength: 64_000 }) }, { additionalProperties: false }),
             outputSchema: Type.Object({ status: Type.String(), issue: Type.Optional(Type.Unknown()) }, { additionalProperties: false }),
             async execute(_id: string, params: { body: string }) {
-              const result = await serialize(async () => {
+              const result = await serializeIssueUpdate(async () => {
                 const { assignment, issue, job } = await loadAssignment();
                 const currentUpdate = job.issueUpdate;
                 if (currentUpdate?.status === "needs-inspection" || currentUpdate?.status === "writing" ||
                     currentUpdate?.status === "abandoned") {
                   throw new Error("An earlier issue body update needs operator inspection before another write.");
                 }
-                const { issueUpdate: _previousUpdate, ...jobWithoutPreviousUpdate } = job;
                 const pending: NonNullable<Job["issueUpdate"]> = {
                   status: "writing",
                   operationId: randomUUID(),
                   bodyHash: createHash("sha256").update(params.body).digest("hex"),
                   updatedAt: new Date().toISOString(),
                 };
-                await writeJob(issue, { ...jobWithoutPreviousUpdate, issueUpdate: pending });
+                await patchJob(issue, (current) => {
+                  if (current.issueUpdate?.status === "needs-inspection" || current.issueUpdate?.status === "writing" ||
+                      current.issueUpdate?.status === "abandoned") {
+                    throw new Error("An earlier issue body update needs operator inspection before another write.");
+                  }
+                  return { ...current, issueUpdate: pending };
+                });
                 try {
                   const updated = await issueProvider.updateIssueBody(
                     assignment.repository,
@@ -362,19 +386,29 @@ export default definePluginEntry({
                     assertCurrent,
                   );
                   assertCurrent();
-                  await writeJob(issue, { ...jobWithoutPreviousUpdate, updatedAt: new Date().toISOString() });
+                  await patchJob(issue, (current) => {
+                    if (current.issueUpdate?.operationId !== pending.operationId) {
+                      throw new Error("Issue update operation changed; operator inspection is required.");
+                    }
+                    const { issueUpdate: _completedUpdate, ...currentWithoutUpdate } = current;
+                    return { ...currentWithoutUpdate, updatedAt: new Date().toISOString() };
+                  });
                   return { status: "updated", issue: updated };
                 } catch (error) {
                   const uncertain = !(error instanceof GitHubIssueError) ||
                     (error instanceof GitHubIssueError && error.code === "GITHUB_WRITE_UNCERTAIN");
                   if (uncertain) {
-                    await writeJob(issue, {
-                      ...jobWithoutPreviousUpdate,
+                    await patchJob(issue, (current) => ({
+                      ...current,
                       issueUpdate: { ...pending, status: "needs-inspection", updatedAt: new Date().toISOString() },
-                    });
+                    }));
                     throw new Error("Issue body update outcome is uncertain; operator inspection is required.");
                   }
-                  await writeJob(issue, { ...jobWithoutPreviousUpdate, updatedAt: new Date().toISOString() });
+                  await patchJob(issue, (current) => {
+                    if (current.issueUpdate?.operationId !== pending.operationId) return current;
+                    const { issueUpdate: _failedUpdate, ...currentWithoutUpdate } = current;
+                    return { ...currentWithoutUpdate, updatedAt: new Date().toISOString() };
+                  });
                   throw error;
                 }
               });
