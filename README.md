@@ -80,17 +80,20 @@ the runner.
 
 ## Synthetic WBS2 dispatcher
 
-The image includes `@openclaw/lobster@2026.11.3`. Tools `agent_crew_dispatch`
-and `agent_crew_status` accept
-`repository` (owner/name) and a positive `issueNumber`. The Gateway plugin uses
+The image includes `@openclaw/lobster@2026.11.3`. The read-only
+`agent_crew_status` tool accepts a `repository` (owner/name) and positive
+`issueNumber`. The operator-only `agent-crew.dispatch` Gateway method accepts
+those fields for synthetic checks. The Gateway plugin uses
 `AGENT_CREW_GATEWAY_TOKEN` for authenticated loopback calls; local Compose
 supplies its disposable operator token. The native issue session's
 `agent-crew-job` extension holds admission and workflow status.
 
-The operator Gateway method `agent-crew.resolve` accepts the same issue fields,
-`decision` (`retry` or `abandon`) and a nonempty inspection `note`. It requires
-`operator.admin` and only accepts `needs-inspection` work. Retry authorizes a
-new dispatch; it does not automatically resume a possibly running workflow.
+The operator Gateway method `agent-crew.dispatch` accepts a repository and
+issue number and requires `operator.admin`; agents cannot dispatch arbitrary
+issues. `agent-crew.resolve` also requires `operator.admin` and a nonempty
+inspection note. It resolves uncertain workflow starts with `retry` or
+`abandon`, and uncertain issue body updates with target `issue-update` and
+decision `confirm`, `retry` or `abandon`.
 
 `./scripts/check-all.sh` also runs `scripts/check-dispatcher.mjs` (host Node.js
 required). It counts actual synthetic Lobster executions, checks duplicate and
@@ -99,3 +102,14 @@ restart blocking and explicit operator decisions. Its fixed workflow only
 writes a disposable execution log and returns a synthetic result; it performs
 no coding, GitHub or Slack actions. It uses and removes its own Compose project
 and volume and needs local port 18789 available.
+
+## WBS3 GitHub issue access
+
+Configure the plugin with `github.repository` and optional `github.pollIntervalMs`
+to enable polling. The Gateway reads the pre-provisioned GitHub App installation
+token from `/run/secrets/agent-crew-github-installation-token`; local Docker
+users can mount it with `infra/local-dev/openclaw/compose.github.yaml` using a
+file at `.local/secrets/github-app-installation-token`. The installation needs
+Issues read/write permission. WBS3 checks use deterministic fixtures unless a
+disposable GitHub repository and installation token are supplied; fixture
+results are not live GitHub qualification.

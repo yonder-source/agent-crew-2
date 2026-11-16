@@ -1,7 +1,7 @@
 {
   "id": "agent-crew",
   "name": "Agent Crew",
-  "description": "Synthetic Agent Crew issue dispatcher and status",
+  "description": "Agent Crew GitHub issue discovery and assigned issue access",
   "version": "0.1.0",
   "kind": "plugin",
   "configSchema": {
@@ -9,9 +9,18 @@
     "additionalProperties": false,
     "required": ["environment"],
     "properties": {
-      "environment": { "type": "string", "minLength": 1 }
+      "environment": { "type": "string", "minLength": 1 },
+      "github": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["repository"],
+        "properties": {
+          "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+          "pollIntervalMs": { "type": "integer", "minimum": 10000, "maximum": 3600000 }
+        }
+      }
     }
   },
-  "contracts": { "tools": ["agent_crew_status", "agent_crew_dispatch", "agent_crew_environment"] },
+  "contracts": { "tools": ["agent_crew_status", "agent_crew_environment", "agent_crew_issue_read", "agent_crew_issue_update"] },
   "activation": { "onStartup": true }
 }

@@ -5,8 +5,9 @@ bootstrap plan for the restart WBS; root [`SPEC.md`](../../SPEC.md) was
 initialized from it and evolves as the WBS work settles requirements and
 decisions. This package also preserves restart-specific evidence, implementation
 packages and historical context. [WBS0](wbs0.md) records feasibility findings,
-[WBS1](wbs1.md) is the foundation package, and [WBS2](wbs2.md) is the dispatcher
-package. [Outstanding items](outstanding.md) captures proposed solutions and
+[WBS1](wbs1.md) is the foundation package, [WBS2](wbs2.md) is the dispatcher
+package, and [WBS3](wbs3.md) adds GitHub discovery and assigned issue access.
+[Outstanding items](outstanding.md) captures proposed solutions and
 deferred questions.
 
 The [evidence](evidence/) includes the restart research, the native workflow

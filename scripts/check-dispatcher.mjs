@@ -18,7 +18,7 @@ async function tool(name, number) {
   assert.equal(result.ok, true, JSON.stringify(result));
   return result.output.details;
 }
-const dispatch = (number) => tool("agent_crew_dispatch", number);
+const dispatch = (number) => call("agent-crew.dispatch", issue(number));
 const status = (number) => tool("agent_crew_status", number);
 const resolve = (number, decision) => call("agent-crew.resolve", { ...issue(number), decision, note: "Synthetic operator inspected fixture" });
 async function count() {
