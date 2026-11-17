@@ -22,6 +22,12 @@ module extensions and declaration files explicitly. Keep generated output and
 installed dependencies outside lint inputs. Use validators for JSON, Compose
 and workflow configuration, and shell syntax checks for shell entry points.
 
+The baseline active inputs are `src/index.ts`, `src/config.mjs`,
+`src/config.d.mts`, the five `scripts/*.mjs` checks and
+`infra/local-dev/openclaw/workflows/synthetic-issue.mjs`. Archived JavaScript
+under `docs/restart/evidence/lobster-prototype/` is retained evidence, not a
+product integration check; include it in basic JavaScript lint coverage.
+
 The existing VM fixture loads built dispatcher code. Config checks and Docker
 health probes use fixed Node invocations. Synthetic workflows write under their
 fixture root. Local checks use disposable Gateway credentials. Evaluate each

@@ -2,6 +2,9 @@
 
 Status: complete.
 
+Inventory rechecked against baseline `87b644c`: source/check paths and all
+relative links in `docs/noslop/` resolve. The worktree was clean before delivery.
+
 ## Inventory
 
 Record source paths, existing checks and behavioral risks in
@@ -10,6 +13,9 @@ enforcement. Do not add a separate exception registry; the configurations that
 enforce checks own their exceptions.
 
 ## Baseline findings
+
+These findings describe the pre-WBS1 baseline; [rules.md](rules.md) tracks
+coverage as subsequent packages land.
 
 - TypeScript strict mode and Docker-based checks already exist.
 - ESLint, typed lint presets and a quality-tool dependency lockfile remain to
