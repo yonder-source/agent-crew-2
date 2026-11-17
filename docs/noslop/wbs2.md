@@ -1,6 +1,6 @@
 # WBS2 — Focused repository restrictions
 
-Status: planned. Depends on WBS1.
+Status: complete. Depends on WBS1.
 
 ## Deliver
 
@@ -32,17 +32,30 @@ Status: planned. Depends on WBS1.
    cannot cover. Include isolated accepted and rejected cases and useful
    diagnostics.
 
-## Candidate risk mapping
+## Implemented risk mapping
 
-Confirm rule behavior against the installed ESLint version and fixtures before
-choosing a rule; these candidates do not claim to cover aliases or wrappers.
+`eslint.config.mjs` owns the rules and local named-import exceptions.
+`scripts/check-lint.mjs` exercises actual CLI diagnostics and exception paths.
 
-| Risk | Candidate native restriction |
+| Risk | Native restriction |
 | --- | --- |
 | Dynamic code execution | `no-eval`, `no-new-func`, `no-restricted-syntax` |
-| Shell construction | `no-restricted-imports`, `no-restricted-properties`, `no-restricted-syntax` |
+| Shell construction | `no-restricted-imports` for child_process; `no-restricted-syntax` for shell options |
 | Private SDK import | `no-restricted-imports` |
 | Production import from test or historical material | `no-restricted-imports` |
+
+Dynamic imports, require loaders and createRequire are rejected; static module
+restrictions cover renamed/destructured bindings at import time. Re-exports are
+also exercised. No current production import chain requires a dependency-graph
+package; direct path restrictions do not establish arbitrary transitive or
+data-flow safety. VM exceptions permit only createContext/runInContext; CLI
+exceptions permit only each existing helper's spawnSync or execFile import.
+Synthetic filesystem I/O needs no exception to these execution/import rules.
+
+`scripts/check-deployment.mjs` consumes native resolved Compose JSON, validates
+the current local deployment intent and runs isolated mutation fixtures. The
+shared shell entry invokes it before building; OpenClaw schema validation stays
+in the existing native configuration check.
 
 ## Delivery size
 
@@ -62,3 +75,10 @@ unsafe mutation to a confirmed local Compose/OpenClaw requirement. Record
 reusable restrictions separately from Agent Crew settings, and distinguish
 fixture, mock, native synthetic and live evidence; this WBS does not claim live
 deployment acceptance.
+
+The shared Docker suite passed, including native synthetic restart, SIGKILL,
+retry and abandon scenarios. After narrowing VM imports and extending the
+exception fixtures, the updated source passed the container lint fixtures,
+build smoke-import and mock boundary checks. Resolved deployment assertions
+and mutation fixtures also passed. Exact commands and logs are in local
+project memory.

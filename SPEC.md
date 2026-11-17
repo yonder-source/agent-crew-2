@@ -190,6 +190,23 @@ owns enabled rules and narrow exceptions. Behavioral tests establish validation,
 authorization and uncertain-effect handling. Confirm actual GitHub protection
 capabilities before introducing custom approval infrastructure.
 
+WBS2 uses native ESLint restrictions for eval/Function/string timers, process
+and VM imports, the reviewed public SDK entry points and direct production
+imports from scripts/tests/historical material. Static ESM imports are required:
+dynamic imports, require loaders and createRequire are rejected so destructured
+or renamed bindings cannot bypass module restrictions. Fixed CLI helpers have
+file-specific named-import exceptions; the mock harness permits only
+createContext/runInContext. Shell options are rejected. These are syntax and
+import boundaries, not a general analysis of indirect data flow or subprocess
+arguments. No dependency-graph package is required by the current import graph.
+
+The shared checks entry validates resolved Compose JSON with dependency-free
+Node assertions for loopback ports, isolated networking, unprivileged services,
+state persistence, the read-only lint mount and current OpenClaw plugin/tool,
+authentication and version settings. Native OpenClaw validation still owns
+schema validity. Actual CLI fixtures exercise restrictions and narrow exceptions;
+isolated model mutations exercise deployment assertions.
+
 For every package, record test commands/results and reusable candidates in local
 project memory; move settled requirements into this specification. Distinguish
 mock, native synthetic and live integration evidence. Extend checks for future

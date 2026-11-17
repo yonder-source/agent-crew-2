@@ -1,15 +1,15 @@
 # Coverage inventory
 
-WBS1 enables the standard tooling below. WBS2–4 restrictions and regressions
-remain planned; executable configuration owns rule details.
+WBS1–2 enable the tooling and focused restrictions below. WBS3–4 regressions
+and authority checks remain planned; executable configuration owns rule details.
 
 | Area | Existing evidence or configuration | Remaining delivery |
 | --- | --- | --- |
 | Type safety | `tsconfig.json` enables strict mode and three additional flags; `eslint.config.mjs` enables recommended typed rules and unsafe-assertion rejection; `src/index.ts` guards unknown inputs | WBS1 delivered; extend alongside new source |
 | Async work | Typed preset rejects floating/misused Promises; dispatcher serializes admission and awaits state writes | WBS3: failure behavior |
 | JavaScript and tools | `eslint.config.mjs` covers JS/TS module extensions and declarations; `scripts/check-lint.mjs` exercises actual CLI rejection and safe equivalents | WBS1 delivered; JS syntax/scope rules, TS typed rules |
-| Node APIs and imports | Public OpenClaw SDK imports; VM boundary fixture; fixed synthetic file I/O | WBS2: focused restrictions with local fixture exceptions |
-| Deployment | Pinned Docker image; local Compose; OpenClaw config validation | WBS2: resolved settings and intentional exposure/permission assertions |
+| Node APIs and imports | Native ESLint API/import restrictions, named CLI/VM exceptions and real lint fixtures | WBS2 delivered; indirect data-flow analysis is outside syntax rules |
+| Deployment | Native OpenClaw validation plus resolved Compose assertions and mutation fixtures in `scripts/check-deployment.mjs` | WBS2 delivered; no external deployment changes |
 | Inputs and public output | `scripts/check-dispatcher-boundaries.mjs` uses mocked Gateway responses and continuation canaries | WBS3: missing malformed-envelope, error and public-output cases |
 | Errors and secrets | `scripts/check-config.mjs` checks parsing and native config validity | WBS3: missing secret-canary and uncertain-effect cases |
 | Persistence and recovery | `scripts/session-roundtrip.mjs`, `scripts/check-dispatcher.mjs` exercise restart, duplicates, SIGKILL and operator decisions | WBS3: missing persistence-failure and low-privilege denial cases |
