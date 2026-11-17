@@ -6,13 +6,18 @@ import { parseConfig } from "./config.mjs";
 
 const NAMESPACE = "agent-crew-job";
 const AGENT_ID = "main";
-const LOCKED = new Set(["starting", "active", "completed", "needs-inspection", "abandoned"]);
+const JOB_STATUSES = ["starting", "active", "completed", "needs-inspection", "retry-approved", "abandoned"] as const;
+type JobStatus = typeof JOB_STATUSES[number];
+
+function isJobStatus(value: unknown): value is JobStatus {
+  return JOB_STATUSES.some((status) => status === value);
+}
 
 type Issue = { repository: string; number: number };
 type Job = Issue & {
   jobId: string;
   sessionKey: string;
-  status: "starting" | "active" | "completed" | "needs-inspection" | "retry-approved" | "abandoned";
+  status: JobStatus;
   bootId: string;
   updatedAt: string;
   workflowRef?: string;
@@ -20,6 +25,20 @@ type Job = Issue & {
   error?: string;
   decision?: string;
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isJob(value: unknown): value is Job {
+  return isRecord(value) && typeof value.repository === "string" &&
+    typeof value.number === "number" && Number.isSafeInteger(value.number) && value.number > 0 &&
+    typeof value.jobId === "string" && typeof value.sessionKey === "string" &&
+    typeof value.bootId === "string" && typeof value.updatedAt === "string" &&
+    isJobStatus(value.status) &&
+    ["workflowRef", "workflowStatus", "error", "decision"].every((key) =>
+      !(key in value) || typeof value[key] === "string");
+}
 
 // Explicit output boundary: continuation credentials stay in session metadata.
 function publicJob(job: Job) {
@@ -70,18 +89,20 @@ export default definePluginEntry({
       const response = await call("sessions.describe", { key: sessionKey(issue) });
       const session: unknown = response.session;
       if (session === null) return null;
-      if (typeof session !== "object" || Array.isArray(session)) {
+      if (!isRecord(session)) {
         throw new Error("Invalid Gateway session response; operator inspection required");
       }
-      const extensions = (session as { pluginExtensions?: unknown }).pluginExtensions;
+      const extensions = session.pluginExtensions;
       if (extensions === undefined) return [];
-      if (!Array.isArray(extensions) || extensions.some((item: unknown) =>
-        typeof item !== "object" || item === null || Array.isArray(item) ||
-        typeof (item as { pluginId?: unknown }).pluginId !== "string" ||
-        typeof (item as { namespace?: unknown }).namespace !== "string")) {
+      if (!Array.isArray(extensions)) {
         throw new Error("Invalid session extensions; operator inspection required");
       }
-      return extensions as Array<{ pluginId: string; namespace: string; value: unknown }>;
+      return extensions.map((item: unknown) => {
+        if (!isRecord(item) || typeof item.pluginId !== "string" || typeof item.namespace !== "string") {
+          throw new Error("Invalid session extensions; operator inspection required");
+        }
+        return { pluginId: item.pluginId, namespace: item.namespace, value: item.value };
+      });
     };
     const writeJob = async (issue: Issue, job: Job): Promise<void> => {
       await call("sessions.pluginPatch", {
@@ -99,12 +120,11 @@ export default definePluginEntry({
       const extensions = await session;
       const value = extensions?.find((item) => item.pluginId === "agent-crew" && item.namespace === NAMESPACE)?.value;
       if (value === undefined) return undefined;
-      const job = value as Job;
-      if (!job || job.repository !== issue.repository || job.number !== issue.number ||
-          job.sessionKey !== sessionKey(issue) || typeof job.jobId !== "string" ||
-          typeof job.bootId !== "string" || !(LOCKED.has(job.status) || job.status === "retry-approved")) {
+      if (!isJob(value) || value.repository !== issue.repository || value.number !== issue.number ||
+          value.sessionKey !== sessionKey(issue)) {
         throw new Error("Invalid issue admission metadata; operator inspection required");
       }
+      const job = value;
       // Read-only normalization avoids a status request racing an operator reset.
       return job.status === "starting" && job.bootId !== bootId
         ? { ...job, status: "needs-inspection" as const } : job;
@@ -151,7 +171,7 @@ export default definePluginEntry({
         const result = await serialize(async () => {
           const session = describe(issue);
           const existing = await readJob(issue, session);
-          if (existing && LOCKED.has(existing.status)) return existing;
+          if (existing && existing.status !== "retry-approved") return existing;
           if ((await session) === null) await call("sessions.create", { key: sessionKey(issue) });
           const job = { ...baseJob(issue), ...(existing?.decision ? { decision: existing.decision } : {}) };
           await writeJob(issue, job);
@@ -166,18 +186,18 @@ export default definePluginEntry({
               },
               sessionKey: job.sessionKey,
             });
-            const output = response.output as { details?: Record<string, unknown> } | undefined;
-            const workflow = output?.details;
+            const output = response.output;
+            const workflow = isRecord(output) && isRecord(output.details) ? output.details : undefined;
             if (response.ok !== true || workflow?.ok !== true ||
                 !["ok", "needs_approval", "needs_input", "cancelled"].includes(String(workflow.status))) {
               throw new Error("Lobster did not return a recognized successful response; inspect the Gateway workflow logs");
             }
-            const continuation = (workflow.requiresApproval ?? workflow.requiresInput) as { resumeToken?: string } | null;
+            const continuation = workflow.requiresApproval ?? workflow.requiresInput;
             const completed: Job = {
               ...job,
               status: workflow.status === "ok" ? "completed" : workflow.status === "cancelled" ? "needs-inspection" : "active",
               workflowStatus: String(workflow.status),
-              ...(typeof continuation?.resumeToken === "string" ? { workflowRef: continuation.resumeToken } : {}),
+              ...(isRecord(continuation) && typeof continuation.resumeToken === "string" ? { workflowRef: continuation.resumeToken } : {}),
               updatedAt: new Date().toISOString(),
             };
             await writeJob(issue, completed);
@@ -201,7 +221,7 @@ export default definePluginEntry({
     api.registerGatewayMethod("agent-crew.resolve", async ({ params, respond }) => {
         try {
           if (typeof params !== "object" || params === null) throw new Error("resolution parameters are required");
-          const values = params as { repository?: unknown; issueNumber?: unknown; decision?: unknown; note?: unknown };
+          const values = params;
           if ((values.decision !== "retry" && values.decision !== "abandon") || typeof values.note !== "string" || values.note.trim() === "") {
             throw new Error("decision must be retry or abandon and include a note");
           }
@@ -236,9 +256,9 @@ export default definePluginEntry({
       description: "Read Agent Crew plugin environment",
       parameters: Type.Object({}, { additionalProperties: false }),
       outputSchema: Type.Object({ status: Type.String(), environment: Type.String() }, { additionalProperties: false }),
-      async execute() {
+      execute() {
         const details = { status: "ready", environment: config.environment };
-        return { content: [{ type: "text" as const, text: JSON.stringify(details) }], details };
+        return Promise.resolve({ content: [{ type: "text" as const, text: JSON.stringify(details) }], details });
       },
     });
   },

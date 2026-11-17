@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc --noEmit false",
+    "build": "tsc --noEmit false && node --input-type=module -e \"await import('./dist/config.mjs')\"",
+    "lint": "eslint . --max-warnings=0",
+    "check:lint": "node scripts/check-lint.mjs",
     "typecheck": "tsc --noEmit",
     "check:config": "node scripts/check-config.mjs",
     "check:gateway": "node scripts/check-gateway.mjs"
@@ -19,5 +21,12 @@
     "extensions": ["./dist/index.js"],
     "compat": { "pluginApi": "2026.11.3" },
     "build": { "openclawVersion": "2026.11.3" }
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.15.0",
+    "globals": "17.14.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.73.0"
   }
 }

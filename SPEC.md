@@ -133,10 +133,64 @@ successful path. Report any unverified integration separately.
 
 ## Planning
 
-Keep each package reviewable in one agent session, targeting 200–300 changed
-lines including tests and documentation. Split larger packages when needed and
-review each before starting the next.
+Keep each package reviewable in one agent session, targeting 300–600 handwritten
+changed lines per branch/PR (additions plus deletions), including tests and
+documentation. Above 800 lines, review whether to split. Report lockfile and
+generated changes separately. Keep each delivery independently verifiable.
 
 - [WBS0 — restart decisions and targeted feasibility](docs/restart/wbs0.md)
 - [WBS1 — Dockerized OpenClaw foundation](docs/restart/wbs1.md)
 - [Current exploration items](docs/restart/outstanding.md)
+
+- [NoSlop development checks](docs/noslop/README.md)
+
+## NoSlop development checks
+
+NoSlop constrains AI-generated changes through standard lint, TypeScript
+checks, focused product regressions and CI. Agent Crew is the first host;
+reusable practices for other Node.js, TypeScript and Docker repositories are
+identified during delivery and extracted after implementation review.
+
+WBS0 records the verified baseline inventory. WBS1 adds locked development
+tooling and shared Docker/CI lint, compiler and lint-configuration checks.
+WBS2–5 cover repository restrictions, regression gaps, merge/change authority
+and final acceptance.
+
+`eslint.config.mjs` applies ESLint recommended rules to JavaScript and
+typescript-eslint recommended typed rules to TypeScript, including declarations.
+The resolved typed preset already enables floating/misused Promise checks;
+`no-unsafe-type-assertion` is added explicitly because the preset omits it.
+Only installed dependencies and compiled output are ignored. Application code,
+scripts, JavaScript workflows and retained JavaScript evidence are linted.
+JavaScript receives syntax/scope rules; typed checks apply to the TypeScript
+project. Input boundaries use runtime guards instead of narrowing assertions.
+The checks image copies the source tree, including `.github` scripts. Compose
+mounts the checkout read-only at `/lint-source`; coverage acceptance compares
+its JS/TS inventory with ESLint's actual results in the image. Missing, ignored
+or extra source files fail the check. Dependency/generated/local-state trees
+are excluded from inventory. Fixtures cover new root, nested and hidden paths.
+Job status types and validation share one literal list; only `retry-approved`
+permits another dispatch after an existing job is found.
+
+Enable `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes` and
+`noFallthroughCasesInSwitch` alongside strict mode. All three are suitable for
+the current source; no compiler flag or typed rule exception is needed.
+The paired `src/config.mjs` is explicitly listed in `tsconfig.json` so declaration
+discovery cannot suppress its runtime emit; the build smoke-imports its output.
+The build/check stages install pinned development dependencies using the
+committed lockfile and `npm ci --include=dev --legacy-peer-deps --ignore-scripts`.
+The pinned OpenClaw image supplies the peer SDK and its matching release supplies real
+declarations. Runtime dependencies remain unchanged, and quality tools stay
+in build/check stages. The existing `scripts/check-all.sh` remains the shared
+CI entry and exercises CLI lint acceptance fixtures as well as product checks.
+
+Use maintained presets, native validators and existing test/CI entry points.
+Custom checkers require a demonstrated gap and focused tests. Tool configuration
+owns enabled rules and narrow exceptions. Behavioral tests establish validation,
+authorization and uncertain-effect handling. Confirm actual GitHub protection
+capabilities before introducing custom approval infrastructure.
+
+For every package, record test commands/results and reusable candidates in local
+project memory; move settled requirements into this specification. Distinguish
+mock, native synthetic and live integration evidence. Extend checks for future
+product capabilities alongside their implementation.
