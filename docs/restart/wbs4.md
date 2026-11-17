@@ -3,7 +3,7 @@
 ## Goal
 
 Run an assigned issue through a real coding agent in OpenClaw's Docker sandbox
-and return its result to Lobster. The [restart specification](spec.md) defines
+and return its result to Lobster. The [root SPEC](../../SPEC.md) defines
 the MVP workflow.
 
 ## Entry conditions
@@ -28,7 +28,7 @@ or Docker socket. Document the local setup.
 **Work:** Connect the Lobster workflow to the selected coding runtime using the
 issue-specific OpenClaw session and the WBS3 issue data. Start with a 20-minute
 timeout for the Lobster call and coding-agent step.
-See [timeouts](spec.md#error-timeout).
+See [timeouts](../../SPEC.md#admission-and-uncertain-outcomes).
 
 **Done when:** A ready test issue starts one coding turn in its assigned session,
 and the session records the run ID and status. The agent receives the assigned
@@ -43,8 +43,8 @@ workspace or branch reference and validation result.
 **Done when:** Lobster receives the result from the assigned run and exposes a
 clear success or failure status. An uncertain result is visible for operator
 inspection before retry.
-See [workflow failures](spec.md#error-workflow) and
-[uncertain outcomes](spec.md#error-uncertain).
+See [workflow failures](../../SPEC.md#admission-and-uncertain-outcomes) and
+[uncertain outcomes](../../SPEC.md#admission-and-uncertain-outcomes).
 
 ## 4.4 Validate a real coding task
 

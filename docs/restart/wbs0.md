@@ -3,7 +3,7 @@
 Status: findings recorded · 2026-11-09
 
 WBS0 captured the restart direction and tested the main integration assumptions.
-The [restart specification](spec.md) owns the resulting MVP requirements;
+The [root SPEC](../../SPEC.md) owns the resulting MVP requirements;
 [WBS1](wbs1.md) begins the Dockerized foundation.
 
 ## 0.1 MVP direction — discussed
@@ -18,7 +18,7 @@ The [restart specification](spec.md) owns the resulting MVP requirements;
   the precise integration remain to be validated.
 - The operator inspects uncertain outcomes before retrying. Automatic recovery
   and Slack-initiated readiness labeling are deferred. See
-  [uncertain outcomes](spec.md#error-uncertain).
+  [uncertain outcomes](../../SPEC.md#admission-and-uncertain-outcomes).
 
 ## 0.2 OpenClaw and Lobster — observed
 
@@ -54,7 +54,7 @@ and [Lobster probes](evidence/lobster-prototype/README.md).
   sandbox and workspace locally first.
 - Start with 20-minute timeouts for each Lobster call and coding-agent step;
   adjust based on real runs. Human waiting occurs between calls. See
-  [timeouts](spec.md#error-timeout).
+  [timeouts](../../SPEC.md#admission-and-uncertain-outcomes).
 - Use OpenClaw session metadata for the initial workflow references. Add
   application persistence only when the workflow demonstrates a need.
 

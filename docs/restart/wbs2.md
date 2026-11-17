@@ -4,7 +4,7 @@
 
 Use a lightweight dispatcher to start one Lobster workflow per issue and keep
 its status in OpenClaw session metadata. The MVP workflow is defined in the
-[restart specification](spec.md).
+[root SPEC](../../SPEC.md).
 
 ## Entry conditions
 
@@ -33,7 +33,7 @@ check it on subsequent requests, including after a Gateway restart.
 
 **Done when:** Two requests for the same synthetic issue result in one workflow
 start and a response identifying the existing work. Requests for different
-issues are processed in order. See [duplicate discovery](spec.md#error-duplicate).
+issues are processed in order. See [duplicate dispatch](../../SPEC.md#admission-and-uncertain-outcomes).
 
 ## 2.3 Lobster workflow start
 
@@ -43,7 +43,7 @@ selected version's supported API.
 
 **Done when:** A request creates a session, starts the synthetic workflow and
 shows its result through the session. Repeating the same request recognizes the
-existing work without starting a second workflow. See [duplicate discovery](spec.md#error-duplicate).
+existing work without starting a second workflow. See [duplicate dispatch](../../SPEC.md#admission-and-uncertain-outcomes).
 
 ## 2.4 Operator status and uncertain outcomes
 
@@ -56,7 +56,7 @@ needs-inspection work. A repeat request for work needing inspection does not
 start another workflow until the operator has inspected and explicitly decided
 how to proceed. An interrupted start whose outcome is unknown remains blocked
 after restart, including when no Lobster reference was returned.
-See [uncertain outcomes](spec.md#error-uncertain).
+See [uncertain outcomes](../../SPEC.md#admission-and-uncertain-outcomes).
 
 ## 2.5 Integration check and handoff
 
@@ -78,3 +78,16 @@ durable state needed before proceeding to WBS3.
 Later work connects issue discovery and assigned-issue Controller APIs, then the
 real coding runtime, draft PR publication and Slack reporting. Add persistent
 state or recovery behavior only when those slices demonstrate a need.
+
+## Runtime qualification note
+
+The pinned `2026.11.3` SDK exposes session-extension registration but no
+plugin-session extension read/write operation. The recorded native
+`sessions.pluginPatch` path requires `operator.admin`; it is not a safe
+dispatcher admission primitive for a regular plugin tool. The SDK does provide
+a durable plugin-owned keyed state store, which is the candidate for the
+smallest persistent admission record. Lobster is an optional separately
+installed tool, and the matching SDK documents no general tool-to-tool invoke
+API for user-installed plugins. Resolve a supported dispatch bridge and verify
+it against the pinned Gateway before treating WBS2 as implemented or starting
+WBS3.

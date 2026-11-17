@@ -3,7 +3,7 @@
 ## Goal
 
 Connect the issue-to-draft-PR workflow to Slack and provide the minimum
-configuration needed to run it. The [restart specification](spec.md) defines
+configuration needed to run it. The [root SPEC](../../SPEC.md) defines
 the MVP workflow.
 
 ## Entry conditions
@@ -21,7 +21,7 @@ Use the selected OpenClaw configuration facilities where suitable.
 
 **Done when:** An operator can configure one repository and Slack channel and
 start the workflow. Invalid or missing required settings produce a clear error.
-See [configuration errors](spec.md#error-configuration).
+See [configuration errors](../../SPEC.md).
 
 ## 6.2 Connect Slack reporting
 
@@ -31,7 +31,7 @@ workflow status to the configured channel.
 **Done when:** A test workflow produces a Slack message identifying the issue
 and its status. A simulated delivery failure is visible to the operator and
 does not misrepresent the workflow or publication outcome.
-See [Slack delivery failures](spec.md#error-slack).
+See [Slack delivery failures](../../SPEC.md#admission-and-uncertain-outcomes).
 
 ## 6.3 Report the draft PR
 
@@ -41,7 +41,7 @@ assigned issue and draft PR URL.
 **Done when:** A successful publication produces a Slack message with the
 correct issue and PR link. An unsuccessful publication reports its status
 without claiming a PR was created.
-See [workflow failures](spec.md#error-workflow).
+See [workflow failures](../../SPEC.md#admission-and-uncertain-outcomes).
 
 ## 6.4 Exercise the MVP workflow
 

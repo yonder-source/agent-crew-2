@@ -1,5 +1,9 @@
 # Agent Crew OpenClaw foundation
 
+Current project requirements and decisions are maintained in the repository
+[`SPEC.md`](SPEC.md). The restart handoff and WBS packages are under
+[`docs/restart/`](docs/restart/README.md).
+
 This checkout pins OpenClaw `2026.11.3` to
 `ghcr.io/openclaw/openclaw@sha256:e73f689d663567f0fe3c5a85c54beb3e102dc21f0814bf375e9039ee2d2df51b`.
 The image supplies Node.js `24.22.1`, npm `12.2.2`, OpenClaw/plugin SDK
