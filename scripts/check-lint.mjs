@@ -60,6 +60,7 @@ for (const file of [
   "scripts/check-config.mjs", "scripts/check-dispatcher-boundaries.mjs",
   "scripts/check-dispatcher.mjs", "scripts/check-gateway.mjs",
   "scripts/session-roundtrip.mjs", "scripts/check-lint.mjs",
+  "scripts/check-deployment.mjs",
   "infra/local-dev/openclaw/workflows/synthetic-issue.mjs",
   "docs/restart/evidence/lobster-prototype/crew-prototype.mjs",
 ]) {

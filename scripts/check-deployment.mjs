@@ -20,7 +20,7 @@ function validate(model, settings, metadata = pkg) {
       assert.equal(port.host_ip, "127.0.0.1", "Published ports must bind IPv4 loopback");
     }
   }
-  assert.ok(gateway.ports.some((port) => port.target === 18789 && port.published === "18789"),
+  assert.ok(gateway.ports.some((port) => port.target === 18789 && String(port.published) === "18789"),
     "Gateway must publish the expected port");
   assert.ok(gateway.volumes.some((volume) => volume.type === "volume"
     && volume.source === "openclaw-data" && volume.target === "/home/node/.openclaw"),
