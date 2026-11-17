@@ -7,20 +7,35 @@ Current project requirements and decisions are maintained in the repository
 This checkout pins OpenClaw `2026.11.3` to
 `ghcr.io/openclaw/openclaw@sha256:e73f689d663567f0fe3c5a85c54beb3e102dc21f0814bf375e9039ee2d2df51b`.
 The image supplies Node.js `24.22.1`, npm `12.2.2`, OpenClaw/plugin SDK
-`2026.11.3`, and TypeBox `1.3.35`. The Docker build adds TypeScript `5.9.3`
-and restores the SDK declaration files from the matching npm release (the runtime
-image omits them). Typechecking uses those declarations, without local SDK stubs.
+`2026.11.3`, and TypeBox `1.3.35`. The Docker build installs locked development
+tools with `npm ci --include=dev --legacy-peer-deps --ignore-scripts`: TypeScript `5.9.3`,
+ESLint `10.15.0`, typescript-eslint `8.73.0`, `@eslint/js` `10.0.1` and
+`globals` `17.14.0`. OpenClaw is supplied by the pinned image, so peer dependency
+installation is skipped. The build restores SDK declarations from the matching
+npm release (the runtime image omits them). Typechecking uses those declarations,
+without local SDK stubs.
 Build tools, restored declarations and plugin sources stay in the separate checks
 image; the Gateway image receives compiled plugin output and runtime files only.
 
 ## Commands
 
-Build and typecheck without installing Node.js dependencies on the host:
+Build and run lint, lint acceptance fixtures, type/config and boundary checks
+without installing Node.js dependencies on the host:
 
 ```sh
 docker compose -f infra/local-dev/openclaw/compose.yaml --profile check build
 docker compose -f infra/local-dev/openclaw/compose.yaml --profile check run --rm checks
 ```
+
+Run just lint in the checks image with
+`docker compose -f infra/local-dev/openclaw/compose.yaml --profile check run --rm checks npm run lint`.
+Typed lint needs the real OpenClaw SDK declarations supplied during Docker build.
+The build also imports emitted `dist/config.mjs`; its source is an explicit
+TypeScript input so the paired declaration cannot suppress JavaScript emit.
+`eslint.config.mjs` uses ESLint recommended rules for JavaScript and
+typescript-eslint recommended typed rules plus `no-unsafe-type-assertion` for
+TypeScript, including declaration files. Only `dist/` and `node_modules/` are
+excluded; scripts, workflows and archived JavaScript evidence are covered.
 
 Start the disposable Gateway, query its health, and stop it:
 
@@ -56,7 +71,7 @@ synthetic `agent-crew-job` metadata on session
 again. It uses no external credentials. The token is only for local disposable
 use and must not be reused elsewhere.
 
-Pull request CI runs the same Docker type/config checks and the Gateway status
+Pull request CI runs the same Docker lint/type/config checks and the Gateway status
 and restart-persistence integration check. Docker availability is required on
 the runner.
 

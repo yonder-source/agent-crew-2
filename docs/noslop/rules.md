@@ -1,19 +1,19 @@
 # Coverage inventory
 
-Planned checks below are not yet enabled. Update this map
-when delivery changes coverage; executable configuration owns rule details.
+WBS1 enables the standard tooling below. WBS2–4 restrictions and regressions
+remain planned; executable configuration owns rule details.
 
 | Area | Existing evidence or configuration | Remaining delivery |
 | --- | --- | --- |
-| Type safety | `tsconfig.json` enables strict mode; `src/index.ts` validates session fields but uses assertions | WBS1: typed preset, targeted assertion rule, compiler flag assessment |
-| Async work | Dispatcher serializes admission and awaits state writes | WBS1: floating/misused Promise rules; WBS3: failure behavior |
-| JavaScript and tools | `src/config.mjs`, `scripts/*.mjs`, workflow `.mjs` execute in existing checks | WBS1: explicit lint coverage, including declarations and module extensions |
+| Type safety | `tsconfig.json` enables strict mode and three additional flags; `eslint.config.mjs` enables recommended typed rules and unsafe-assertion rejection; `src/index.ts` guards unknown inputs | WBS1 delivered; extend alongside new source |
+| Async work | Typed preset rejects floating/misused Promises; dispatcher serializes admission and awaits state writes | WBS3: failure behavior |
+| JavaScript and tools | `eslint.config.mjs` covers JS/TS module extensions and declarations; `scripts/check-lint.mjs` exercises actual CLI rejection and safe equivalents | WBS1 delivered; JS syntax/scope rules, TS typed rules |
 | Node APIs and imports | Public OpenClaw SDK imports; VM boundary fixture; fixed synthetic file I/O | WBS2: focused restrictions with local fixture exceptions |
 | Deployment | Pinned Docker image; local Compose; OpenClaw config validation | WBS2: resolved settings and intentional exposure/permission assertions |
 | Inputs and public output | `scripts/check-dispatcher-boundaries.mjs` uses mocked Gateway responses and continuation canaries | WBS3: missing malformed-envelope, error and public-output cases |
 | Errors and secrets | `scripts/check-config.mjs` checks parsing and native config validity | WBS3: missing secret-canary and uncertain-effect cases |
 | Persistence and recovery | `scripts/session-roundtrip.mjs`, `scripts/check-dispatcher.mjs` exercise restart, duplicates, SIGKILL and operator decisions | WBS3: missing persistence-failure and low-privilege denial cases |
-| CI and review | `.github/workflows/ci.yml` runs `scripts/check-all.sh` | WBS1: new checks in same entry; WBS4: actual merge/authority settings |
+| CI and review | `.github/workflows/ci.yml` runs `scripts/check-all.sh`; Docker checks run lint, acceptance fixtures, type/config and boundary checks from locked tooling | WBS4: actual merge/authority settings |
 
 ## Scope and intentional fixture operations
 

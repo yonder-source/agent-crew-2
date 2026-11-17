@@ -1,6 +1,26 @@
 # WBS1 — Standard tooling and CI
 
-Status: planned. Depends on WBS0.
+Status: complete. Depends on WBS0.
+
+## Implementation
+
+- `package-lock.json` locks the quality toolchain. The Docker build installs
+  development tools explicitly even under the base image's production setting;
+  the runtime stage receives compiled output and existing runtime files only.
+- `eslint.config.mjs` uses maintained recommended presets. The resolved typed
+  preset includes floating/misused Promise rules but omits unsafe narrowing
+  assertions, so `no-unsafe-type-assertion` is added explicitly. Unknown Gateway
+  payloads now pass runtime guards before use.
+- All three assessed compiler flags are enabled without exceptions.
+- `src/config.mjs` is an explicit compiler input alongside its declaration;
+  `npm run build` smoke-imports the emitted module. This prevents declaration
+  discovery from silently omitting a required runtime JavaScript file.
+- `npm run lint` covers JS/TS module extensions and declarations. JavaScript
+  uses recommended syntax/scope rules; TypeScript uses the real SDK-backed
+  project. Scripts, workflows and retained JS evidence remain in scope.
+- `scripts/check-lint.mjs` tests coverage and runs the actual CLI against safe
+  and rejected assertion/Promise/JavaScript examples. Docker checks run these
+  fixtures and lint through the existing `scripts/check-all.sh` CI entry.
 
 ## Deliver
 
@@ -24,6 +44,12 @@ unsafe assertion and floating Promise plus accepted safe equivalents through
 the actual configuration. Confirm intended files are linted and no broad
 ignore silently hides active code. Verify reproducible installation from the
 committed lockfile. Record results and reusable setup in project memory.
+
+The shared Docker suite passed, including lint CLI acceptance, type/config
+checks, mocked boundaries and native synthetic Gateway/session/dispatcher
+restart, SIGKILL, retry and abandon scenarios. This qualifies WBS1 tooling
+and existing synthetic integration; GitHub/Slack workflow acceptance remains
+with the later product packages.
 
 ## Suggested PR boundaries
 

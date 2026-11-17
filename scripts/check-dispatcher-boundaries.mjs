@@ -48,6 +48,18 @@ let resolution;
 await resolve({ params: { ...params, decision: "abandon", note: "inspected" },
   respond: (ok, value) => { assert.equal(ok, true); resolution = value; } });
 safe(resolution);
+const validJob = session.pluginExtensions[0].value;
+for (const patch of [
+  { repository: "other/repo" }, { number: 2 }, { sessionKey: "other" },
+  { jobId: null }, { bootId: 0 }, { updatedAt: false }, { status: "unknown" },
+  { workflowRef: {} }, { workflowStatus: [] }, { error: 1 }, { decision: null },
+]) {
+  session.pluginExtensions[0].value = { ...validJob, ...patch };
+  calls = [];
+  await assert.rejects(dispatch(), /Invalid issue admission metadata/);
+  assert.deepEqual(calls, ["sessions.describe"]);
+  await assert.rejects(status(), /Invalid issue admission metadata/);
+}
 for (const malformed of [undefined, false, [], { pluginExtensions: {} },
   { pluginExtensions: [null] }, { pluginExtensions: [{ pluginId: 1, namespace: "x" }] }]) {
   session = malformed;

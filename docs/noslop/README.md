@@ -8,7 +8,7 @@ completion and review of the actual results.
 
 ## Status and authority
 
-WBS0 inventory is complete. WBS1–5 are planned.
+WBS0 inventory and WBS1 standard tooling are complete. WBS2–5 are planned.
 
 [Root SPEC.md](../../SPEC.md) owns requirements and settled decisions. This
 folder describes delivery and acceptance. Executable tool configuration owns

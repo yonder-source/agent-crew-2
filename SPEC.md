@@ -151,9 +151,31 @@ checks, focused product regressions and CI. Agent Crew is the first host;
 reusable practices for other Node.js, TypeScript and Docker repositories are
 identified during delivery and extracted after implementation review.
 
-WBS0 records the current baseline inventory. WBS1–5 cover standard tooling,
-repository restrictions, regression gaps, merge/change authority and acceptance.
-Enforcement remains planned.
+WBS0 records the verified baseline inventory. WBS1 adds locked development
+tooling and shared Docker/CI lint, compiler and lint-configuration checks.
+WBS2–5 cover repository restrictions, regression gaps, merge/change authority
+and final acceptance.
+
+`eslint.config.mjs` applies ESLint recommended rules to JavaScript and
+typescript-eslint recommended typed rules to TypeScript, including declarations.
+The resolved typed preset already enables floating/misused Promise checks;
+`no-unsafe-type-assertion` is added explicitly because the preset omits it.
+Only installed dependencies and compiled output are ignored. Application code,
+scripts, JavaScript workflows and retained JavaScript evidence are linted.
+JavaScript receives syntax/scope rules; typed checks apply to the TypeScript
+project. Input boundaries use runtime guards instead of narrowing assertions.
+
+Enable `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes` and
+`noFallthroughCasesInSwitch` alongside strict mode. All three are suitable for
+the current source; no compiler flag or typed rule exception is needed.
+The paired `src/config.mjs` is explicitly listed in `tsconfig.json` so declaration
+discovery cannot suppress its runtime emit; the build smoke-imports its output.
+The build/check stages install pinned development dependencies using the
+committed lockfile and `npm ci --include=dev --legacy-peer-deps --ignore-scripts`.
+The pinned OpenClaw image supplies the peer SDK and its matching release supplies real
+declarations. Runtime dependencies remain unchanged, and quality tools stay
+in build/check stages. The existing `scripts/check-all.sh` remains the shared
+CI entry and exercises CLI lint acceptance fixtures as well as product checks.
 
 Use maintained presets, native validators and existing test/CI entry points.
 Custom checkers require a demonstrated gap and focused tests. Tool configuration

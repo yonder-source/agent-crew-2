@@ -6,11 +6,15 @@
     "rootDir": "src",
     "outDir": "dist",
     "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noFallthroughCasesInSwitch": true,
     "allowJs": true,
     "noEmit": true,
     "skipLibCheck": true,
     "types": [],
     "baseUrl": "."
   },
-  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.mjs"]
+  "files": ["src/config.mjs"],
+  "include": ["src/**/*.ts", "src/**/*.cts", "src/**/*.mts", "src/**/*.js", "src/**/*.cjs", "src/**/*.mjs"]
 }

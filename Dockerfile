@@ -5,7 +5,6 @@ USER node
 
 FROM base AS build
 USER root
-RUN npm install --global typescript@5.9.3
 # The runtime image omits declarations; restore them from the matching release.
 RUN cd /tmp && npm pack openclaw@2026.11.3 --ignore-scripts --silent \
     && tar -xzf openclaw-2026.11.3.tgz -C /app --strip-components=1 \
@@ -15,15 +14,21 @@ RUN ln -s /app /app/node_modules/openclaw \
     && mkdir -p /app/extensions/agent-crew \
     && chown node:node /app/extensions/agent-crew
 WORKDIR /app/extensions/agent-crew
-COPY --chown=node:node package.json openclaw.plugin.json tsconfig.json ./
-COPY --chown=node:node src ./src
+COPY --chown=node:node package.json package-lock.json ./
 USER node
-RUN tsc --noEmit false
+# OpenClaw is supplied by the pinned host image, not installed as a second peer.
+RUN npm ci --include=dev --legacy-peer-deps --ignore-scripts --no-audit --no-fund
+COPY --chown=node:node openclaw.plugin.json tsconfig.json ./
+COPY --chown=node:node src ./src
+RUN npm run build
 
 FROM build AS checks
 COPY --chown=node:node openclaw.json ./
-COPY --chown=node:node scripts/check-config.mjs scripts/check-dispatcher-boundaries.mjs ./scripts/
-CMD ["sh", "-lc", "tsc --noEmit && node scripts/check-config.mjs && node scripts/check-dispatcher-boundaries.mjs"]
+COPY --chown=node:node eslint.config.mjs ./
+COPY --chown=node:node scripts ./scripts
+COPY --chown=node:node infra/local-dev/openclaw/workflows ./infra/local-dev/openclaw/workflows
+COPY --chown=node:node docs/restart/evidence/lobster-prototype ./docs/restart/evidence/lobster-prototype
+CMD ["sh", "-c", "npm run lint && npm run check:lint && npm run typecheck && sh -n scripts/check-all.sh && node scripts/check-config.mjs && node scripts/check-dispatcher-boundaries.mjs"]
 
 FROM base AS runtime
 USER root
