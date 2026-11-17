@@ -5,7 +5,7 @@
 Establish a reproducible Docker-based development environment and a minimal
 Agent Crew plugin that runs inside OpenClaw. Demonstrate one native interaction
 through the running Gateway. Product behavior is defined in
-[the restart specification](spec.md).
+[the root SPEC](../../SPEC.md).
 
 ## 1.1 Container and toolchain
 
@@ -22,7 +22,7 @@ Node.js dependencies on the host.
 **Work:** Add the plugin manifest, entrypoint and minimal configuration
 validation. Register a small read-only status capability using the selected
 OpenClaw API. Keep startup failures understandable and free of secret values.
-See [configuration errors](spec.md#error-configuration).
+See [configuration errors](../../SPEC.md).
 
 **Done when:** OpenClaw loads the plugin and its status capability can be
 invoked through the Gateway. Plugin startup and shutdown follow the supported

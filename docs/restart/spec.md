@@ -1,12 +1,9 @@
-# Agent Crew restart specification
+# Agent Crew restart bootstrap and WBS plan
 
-Status: draft for review · 2026-11-09
-
-This document owns the restart's product requirements and decisions. The WBS
-files describe the work and acceptance for individual packages. As later WBS
-reviews settle additional requirements, update this specification rather than
-copying the WBS into it. The original repository specification describes the
-earlier implementation and is historical reference.
+This document bootstraps the restart work packages and records their starting
+product direction. The repository-root [`SPEC.md`](../../SPEC.md) was created
+from this baseline. Update the root spec as WBS work settles requirements and
+decisions; keep this file as the restart bootstrap and package plan.
 
 ## Outcome
 
@@ -62,10 +59,10 @@ small OpenClaw integration; it does not implement this workflow.
 | <a id="error-slack"></a>Slack delivery fails | Show the delivery failure without misrepresenting the workflow or publication outcome. | [6.2](wbs6.md#62-connect-slack-reporting) |
 
 <a id="error-timeout"></a>Each Lobster call and coding-agent step starts with a
-20-minute timeout ([WBS4.2](wbs4.md#42-start-the-coding-agent)). A
-timeout may leave an uncertain outcome. Verify inspection behavior before
-unattended production use. Automatic retry policy for confirmed failures is
-not yet defined; automatic recovery and reconciliation are later decisions.
+20-minute timeout ([WBS4.2](wbs4.md#42-start-the-coding-agent)). A timeout may
+leave an uncertain outcome. Verify inspection behavior before unattended
+production use. Automatic retry policy for confirmed failures is not yet
+defined; automatic recovery and reconciliation are later decisions.
 
 ## Deployment and credentials
 
@@ -81,8 +78,8 @@ Target a cloud VM with Docker for the first production deployment. Validate
 locally before cloud deployment. The selected runtime version and image digest
 must be recorded and checked against the APIs used by the implementation.
 
-The WBS1 foundation pins OpenClaw `2026.11.3` and its matching plugin SDK.
-The [developer handoff](../../README.md) records the image digest, toolchain
+The WBS1 foundation pins OpenClaw `2026.11.3` and its matching plugin SDK. The
+[developer handoff](../../README.md) records the image digest, toolchain
 versions and Docker build and integration-check commands.
 
 ## Later scope
@@ -109,4 +106,9 @@ review each before starting the next.
 
 - [WBS0 — restart decisions and targeted feasibility](wbs0.md)
 - [WBS1 — Dockerized OpenClaw foundation](wbs1.md)
+- [WBS2 — dispatcher and session state](wbs2.md)
+- [WBS3 — GitHub issue discovery and access](wbs3.md)
+- [WBS4 — coding runtime](wbs4.md)
+- [WBS5 — draft PR publication](wbs5.md)
+- [WBS6 — Slack and workflow integration](wbs6.md)
 - [Current exploration items](outstanding.md)

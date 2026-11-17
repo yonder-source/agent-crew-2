@@ -4,7 +4,7 @@
 
 Publish the result of an assigned coding task as a draft GitHub pull request
 through the Controller, then return the PR result to Lobster for reporting.
-The [restart specification](spec.md) defines the MVP workflow.
+The [root SPEC](../../SPEC.md) defines the MVP workflow.
 
 ## Entry conditions
 
@@ -22,7 +22,7 @@ and the source to publish.
 **Done when:** The Controller accepts a result from the assigned session and
 rejects an unbound session or a request for a different issue. The result
 identifies the change and its validation outcome.
-See [assignment rejection](spec.md#error-assignment).
+See [assignment rejection](../../SPEC.md#error-assignment).
 
 ## 5.2 Publish the branch
 
@@ -33,8 +33,8 @@ Controller.
 **Done when:** A valid test result produces a branch containing the intended
 change. A request cannot choose an unrelated repository or issue. An uncertain
 push outcome is visible for operator inspection before retry.
-See [assignment rejection](spec.md#error-assignment) and
-[uncertain outcomes](spec.md#error-uncertain).
+See [assignment rejection](../../SPEC.md#error-assignment) and
+[uncertain outcomes](../../SPEC.md#error-uncertain).
 
 ## 5.3 Create the draft PR
 
@@ -43,7 +43,7 @@ branch. Return the PR URL and status to the caller.
 
 **Done when:** A successful publication produces a draft PR for the assigned
 issue. An uncertain response is visible for operator inspection before retry.
-See [uncertain outcomes](spec.md#error-uncertain).
+See [uncertain outcomes](../../SPEC.md#error-uncertain).
 
 ## 5.4 Return the publication result
 
@@ -52,7 +52,7 @@ retain the PR URL and status with the issue session.
 
 **Done when:** Lobster receives the PR result and the operator can inspect the
 URL and status. Publication failures remain visible in the workflow status.
-See [workflow failures](spec.md#error-workflow).
+See [workflow failures](../../SPEC.md#error-workflow).
 
 ## 5.5 Validate publication and hand off
 

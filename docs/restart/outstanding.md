@@ -4,7 +4,8 @@ Checked items have a proposed solution; their remaining validation is noted.
 Struck-through items are proposed for later review.
 
 - [x] **Issue admission:** Use a single dispatcher queue to check session
-  metadata and start one workflow per issue. Validate the normal dispatch path.
+  metadata and start one workflow per issue. The synthetic dispatch and crash
+  boundary passed the [WBS2 integration check](wbs2.md#runtime-qualification-note).
 - [x] **Human approval:** Start coding when a human manually applies the
   `ready for agent` label in GitHub.
 - [x] **Coding handoff:** Validate the native `openclaw.agent` Lobster step
@@ -20,9 +21,10 @@ Struck-through items are proposed for later review.
   read a platform-injected environment variable; validate the selected cloud
   deployment and credential delivery path before production use.
 - [x] **Minimal state:** Use OpenClaw session metadata for the repository,
-  issue, job ID, workflow status, Lobster reference, and agent run ID. Test a
-  persisted pre-start marker and interruption boundary in WBS2; if metadata
-  cannot support it reliably, determine the smallest durable state needed.
+  issue, job ID, workflow status, Lobster reference, and agent run ID when
+  available. WBS2 verified its persisted pre-start marker and interruption
+  boundary using native session metadata; no additional admission store is
+  needed for the single-Gateway synthetic dispatcher.
 
 
 ## New items for review

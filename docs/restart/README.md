@@ -1,11 +1,13 @@
 # Restart handoff
 
-This directory is the handoff package for a new repository. Copy its contents
-together so the links remain valid. The [specification](spec.md) owns the MVP
-requirements; [WBS0](wbs0.md) records the decisions and feasibility findings,
-and [WBS1](wbs1.md) is the first implementation package. The remaining WBS
-documents describe subsequent work. [Outstanding items](outstanding.md)
-captures proposed solutions and deferred questions.
+This directory is the restart handoff package. [`spec.md`](spec.md) is the
+bootstrap plan for the restart WBS; root [`SPEC.md`](../../SPEC.md) was
+initialized from it and evolves as the WBS work settles requirements and
+decisions. This package also preserves restart-specific evidence, implementation
+packages and historical context. [WBS0](wbs0.md) records feasibility findings,
+[WBS1](wbs1.md) is the foundation package, and [WBS2](wbs2.md) is the dispatcher
+package. [Outstanding items](outstanding.md) captures proposed solutions and
+deferred questions.
 
 The [evidence](evidence/) includes the restart research, the native workflow
 probe report, and the Lobster prototype with its scripts. The probes used
@@ -19,7 +21,8 @@ is relevant context for using OpenClaw with Controller capabilities, while the
 restart revisits Controller placement. ADRs 0002 and 0003 describe the earlier
 SQLite and writer model; they do not establish a SQLite or writer requirement
 for the restart. Revisit them if additional durable application state is needed.
-The restart specification and WBS take precedence over these historical records.
+The root specification owns current requirements; WBS files define package
+work. Historical ADRs do not override either.
 
 Source: Agent Crew repository, commit `585a21b`, plus the locally excluded
 restart research and probe artifacts copied into this package. The historical

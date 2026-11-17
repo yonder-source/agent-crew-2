@@ -4,7 +4,7 @@
 
 Discover issues that a human has marked `ready for agent` and pass them to the
 WBS2 dispatcher. Give agents Controller APIs to read and update only their
-assigned issues. The [restart specification](spec.md) defines the MVP workflow.
+assigned issues. The [root SPEC](../../SPEC.md) defines the MVP workflow.
 
 ## Entry conditions
 
@@ -22,7 +22,7 @@ the selected secret mechanism; use deterministic fixtures for development.
 **Done when:** The interface returns the repository and issue details needed by
 the dispatcher. A failed GitHub request is reported as a failure, and a
 repository with no matching issues returns an empty list.
-See [discovery failures](spec.md#error-discovery).
+See [discovery failures](../../SPEC.md#error-discovery).
 
 ## 3.2 Connect discovery to the dispatcher
 
@@ -33,7 +33,7 @@ coding workflow.
 **Done when:** A labeled synthetic issue reaches the dispatcher. A subsequent
 poll finds the existing work instead of starting another workflow; unlabeled or
 closed issues do not start work.
-See [duplicate discovery](spec.md#error-duplicate).
+See [duplicate discovery](../../SPEC.md#error-duplicate).
 
 ## 3.3 Read the assigned issue
 
@@ -42,7 +42,7 @@ its active session. Derive the repository and issue from the trusted assignment.
 
 **Done when:** An assigned agent receives its issue details. An unbound session
 or a request for a different issue is rejected. Tests cover both paths.
-See [assignment rejection](spec.md#error-assignment).
+See [assignment rejection](../../SPEC.md#error-assignment).
 
 ## 3.4 Update the assigned issue
 
@@ -51,8 +51,8 @@ See [assignment rejection](spec.md#error-assignment).
 **Done when:** An assigned agent can update its issue and receive the result;
 requests outside its assignment are rejected. An uncertain write is visible
 for operator inspection before retry.
-See [assignment rejection](spec.md#error-assignment) and
-[uncertain outcomes](spec.md#error-uncertain).
+See [assignment rejection](../../SPEC.md#error-assignment) and
+[uncertain outcomes](../../SPEC.md#error-uncertain).
 
 ## 3.5 Integration check and handoff
 

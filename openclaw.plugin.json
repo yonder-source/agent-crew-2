@@ -1,7 +1,7 @@
 {
   "id": "agent-crew",
   "name": "Agent Crew",
-  "description": "Agent Crew status and session metadata integration",
+  "description": "Synthetic Agent Crew issue dispatcher and status",
   "version": "0.1.0",
   "kind": "plugin",
   "configSchema": {
@@ -12,6 +12,6 @@
       "environment": { "type": "string", "minLength": 1 }
     }
   },
-  "contracts": { "tools": ["agent_crew_status"] },
+  "contracts": { "tools": ["agent_crew_status", "agent_crew_dispatch", "agent_crew_environment"] },
   "activation": { "onStartup": true }
 }

@@ -1,16 +1,37 @@
 {
   "gateway": {
     "mode": "local",
-    "auth": { "mode": "token", "token": "${OPENCLAW_GATEWAY_TOKEN}" }
+    "auth": {
+      "mode": "token",
+      "token": "${OPENCLAW_GATEWAY_TOKEN}"
+    }
   },
   "plugins": {
-    "load": { "paths": ["/app/extensions/agent-crew"] },
-    "allow": ["agent-crew"],
+    "load": {
+      "paths": [
+        "/app/extensions/agent-crew",
+        "/opt/agent-crew-lobster/node_modules/@openclaw/lobster"
+      ]
+    },
+    "allow": [
+      "agent-crew",
+      "lobster"
+    ],
     "entries": {
       "agent-crew": {
         "enabled": true,
-        "config": { "environment": "disposable" }
+        "config": {
+          "environment": "disposable"
+        }
+      },
+      "lobster": {
+        "enabled": true
       }
     }
+  },
+  "tools": {
+    "alsoAllow": [
+      "lobster"
+    ]
   }
 }
