@@ -1,0 +1,16 @@
+{
+  "gateway": {
+    "mode": "local",
+    "auth": { "mode": "token", "token": "${OPENCLAW_GATEWAY_TOKEN}" }
+  },
+  "plugins": {
+    "load": { "paths": ["/app/extensions/agent-crew"] },
+    "allow": ["agent-crew"],
+    "entries": {
+      "agent-crew": {
+        "enabled": true,
+        "config": { "environment": "disposable" }
+      }
+    }
+  }
+}

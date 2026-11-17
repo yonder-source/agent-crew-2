@@ -1,0 +1,23 @@
+{
+  "name": "agent-crew-openclaw-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit false",
+    "typecheck": "tsc --noEmit",
+    "check:config": "node scripts/check-config.mjs",
+    "check:gateway": "node scripts/check-gateway.mjs"
+  },
+  "dependencies": {
+    "typebox": "1.3.35"
+  },
+  "peerDependencies": {
+    "openclaw": "2026.11.3"
+  },
+  "openclaw": {
+    "extensions": ["./dist/index.js"],
+    "compat": { "pluginApi": "2026.11.3" },
+    "build": { "openclawVersion": "2026.11.3" }
+  }
+}
