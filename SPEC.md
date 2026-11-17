@@ -133,10 +133,35 @@ successful path. Report any unverified integration separately.
 
 ## Planning
 
-Keep each package reviewable in one agent session, targeting 200–300 changed
-lines including tests and documentation. Split larger packages when needed and
-review each before starting the next.
+Keep each package reviewable in one agent session, targeting 300–600 handwritten
+changed lines per branch/PR (additions plus deletions), including tests and
+documentation. Above 800 lines, review whether to split. Report lockfile and
+generated changes separately. Keep each delivery independently verifiable.
 
 - [WBS0 — restart decisions and targeted feasibility](docs/restart/wbs0.md)
 - [WBS1 — Dockerized OpenClaw foundation](docs/restart/wbs1.md)
 - [Current exploration items](docs/restart/outstanding.md)
+
+- [NoSlop development checks](docs/noslop/README.md)
+
+## NoSlop development checks
+
+NoSlop constrains AI-generated changes through standard lint, TypeScript
+checks, focused product regressions and CI. Agent Crew is the first host;
+reusable practices for other Node.js, TypeScript and Docker repositories are
+identified during delivery and extracted after implementation review.
+
+WBS0 records the current baseline inventory. WBS1–5 cover standard tooling,
+repository restrictions, regression gaps, merge/change authority and acceptance.
+Enforcement remains planned.
+
+Use maintained presets, native validators and existing test/CI entry points.
+Custom checkers require a demonstrated gap and focused tests. Tool configuration
+owns enabled rules and narrow exceptions. Behavioral tests establish validation,
+authorization and uncertain-effect handling. Confirm actual GitHub protection
+capabilities before introducing custom approval infrastructure.
+
+For every package, record test commands/results and reusable candidates in local
+project memory; move settled requirements into this specification. Distinguish
+mock, native synthetic and live integration evidence. Extend checks for future
+product capabilities alongside their implementation.
