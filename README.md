@@ -36,6 +36,9 @@ TypeScript input so the paired declaration cannot suppress JavaScript emit.
 typescript-eslint recommended typed rules plus `no-unsafe-type-assertion` for
 TypeScript, including declaration files. Only `dist/` and `node_modules/` are
 excluded; scripts, workflows and archived JavaScript evidence are covered.
+Compose mounts the checkout read-only for `check:lint` to compare its source
+inventory against files actually linted in the image, including `.github`
+scripts. Rebuild the checks image after adding or removing source files.
 
 Start the disposable Gateway, query its health, and stop it:
 

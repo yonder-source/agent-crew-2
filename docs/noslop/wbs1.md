@@ -21,6 +21,12 @@ Status: complete. Depends on WBS0.
 - `scripts/check-lint.mjs` tests coverage and runs the actual CLI against safe
   and rejected assertion/Promise/JavaScript examples. Docker checks run these
   fixtures and lint through the existing `scripts/check-all.sh` CI entry.
+- Review follow-up: the checks stage copies the full source context. Compose
+  mounts the checkout read-only, and coverage checks compare its JS/TS paths
+  with actual lint results. New root/nested/hidden-path fixtures demonstrate
+  successful coverage and rejection of missing files and invalid JavaScript.
+  Job status definitions share one list; every existing non-retry state blocks
+  redispatch in the mock boundary regression.
 
 ## Deliver
 

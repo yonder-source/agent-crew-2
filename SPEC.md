@@ -164,6 +164,13 @@ Only installed dependencies and compiled output are ignored. Application code,
 scripts, JavaScript workflows and retained JavaScript evidence are linted.
 JavaScript receives syntax/scope rules; typed checks apply to the TypeScript
 project. Input boundaries use runtime guards instead of narrowing assertions.
+The checks image copies the source tree, including `.github` scripts. Compose
+mounts the checkout read-only at `/lint-source`; coverage acceptance compares
+its JS/TS inventory with ESLint's actual results in the image. Missing, ignored
+or extra source files fail the check. Dependency/generated/local-state trees
+are excluded from inventory. Fixtures cover new root, nested and hidden paths.
+Job status types and validation share one literal list; only `retry-approved`
+permits another dispatch after an existing job is found.
 
 Enable `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes` and
 `noFallthroughCasesInSwitch` alongside strict mode. All three are suitable for

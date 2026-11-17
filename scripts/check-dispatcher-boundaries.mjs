@@ -49,6 +49,16 @@ await resolve({ params: { ...params, decision: "abandon", note: "inspected" },
   respond: (ok, value) => { assert.equal(ok, true); resolution = value; } });
 safe(resolution);
 const validJob = session.pluginExtensions[0].value;
+for (const state of ["starting", "active", "completed", "needs-inspection", "abandoned"]) {
+  session.pluginExtensions[0].value = { ...validJob, status: state };
+  calls = [];
+  assert.equal((await dispatch()).details.status, state);
+  assert.deepEqual(calls, ["sessions.describe"], `${state} must block another start`);
+}
+session.pluginExtensions[0].value = { ...validJob, status: "retry-approved" };
+calls = [];
+await dispatch();
+assert.equal(calls.filter((method) => method === "tools.invoke").length, 1);
 for (const patch of [
   { repository: "other/repo" }, { number: 2 }, { sessionKey: "other" },
   { jobId: null }, { bootId: 0 }, { updatedAt: false }, { status: "unknown" },

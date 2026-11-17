@@ -6,13 +6,18 @@ import { parseConfig } from "./config.mjs";
 
 const NAMESPACE = "agent-crew-job";
 const AGENT_ID = "main";
-const LOCKED = new Set(["starting", "active", "completed", "needs-inspection", "abandoned"]);
+const JOB_STATUSES = ["starting", "active", "completed", "needs-inspection", "retry-approved", "abandoned"] as const;
+type JobStatus = typeof JOB_STATUSES[number];
+
+function isJobStatus(value: unknown): value is JobStatus {
+  return JOB_STATUSES.some((status) => status === value);
+}
 
 type Issue = { repository: string; number: number };
 type Job = Issue & {
   jobId: string;
   sessionKey: string;
-  status: "starting" | "active" | "completed" | "needs-inspection" | "retry-approved" | "abandoned";
+  status: JobStatus;
   bootId: string;
   updatedAt: string;
   workflowRef?: string;
@@ -30,8 +35,7 @@ function isJob(value: unknown): value is Job {
     typeof value.number === "number" && Number.isSafeInteger(value.number) && value.number > 0 &&
     typeof value.jobId === "string" && typeof value.sessionKey === "string" &&
     typeof value.bootId === "string" && typeof value.updatedAt === "string" &&
-    (value.status === "starting" || value.status === "active" || value.status === "completed" ||
-      value.status === "needs-inspection" || value.status === "retry-approved" || value.status === "abandoned") &&
+    isJobStatus(value.status) &&
     ["workflowRef", "workflowStatus", "error", "decision"].every((key) =>
       !(key in value) || typeof value[key] === "string");
 }
@@ -167,7 +171,7 @@ export default definePluginEntry({
         const result = await serialize(async () => {
           const session = describe(issue);
           const existing = await readJob(issue, session);
-          if (existing && LOCKED.has(existing.status)) return existing;
+          if (existing && existing.status !== "retry-approved") return existing;
           if ((await session) === null) await call("sessions.create", { key: sessionKey(issue) });
           const job = { ...baseJob(issue), ...(existing?.decision ? { decision: existing.decision } : {}) };
           await writeJob(issue, job);

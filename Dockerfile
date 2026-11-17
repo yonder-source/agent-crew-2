@@ -23,11 +23,7 @@ COPY --chown=node:node src ./src
 RUN npm run build
 
 FROM build AS checks
-COPY --chown=node:node openclaw.json ./
-COPY --chown=node:node eslint.config.mjs ./
-COPY --chown=node:node scripts ./scripts
-COPY --chown=node:node infra/local-dev/openclaw/workflows ./infra/local-dev/openclaw/workflows
-COPY --chown=node:node docs/restart/evidence/lobster-prototype ./docs/restart/evidence/lobster-prototype
+COPY --chown=node:node . ./
 CMD ["sh", "-c", "npm run lint && npm run check:lint && npm run typecheck && sh -n scripts/check-all.sh && node scripts/check-config.mjs && node scripts/check-dispatcher-boundaries.mjs"]
 
 FROM base AS runtime
