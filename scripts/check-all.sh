@@ -6,9 +6,12 @@ COMPOSE_FILE=infra/local-dev/openclaw/compose.yaml
 export COMPOSE_PROJECT_NAME
 export COMPOSE_FILE
 
-cleanup() { docker compose down --volumes; }
+deployment_model=$(mktemp)
+cleanup() { docker compose down --volumes; rm -f "$deployment_model"; }
 trap cleanup EXIT INT TERM
 
+docker compose --profile check config --format json > "$deployment_model"
+node scripts/check-deployment.mjs "$deployment_model"
 docker compose --profile check build
 docker compose --profile check run --rm checks
 docker compose up -d --force-recreate --wait --wait-timeout 300 gateway

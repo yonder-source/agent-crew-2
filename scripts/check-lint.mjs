@@ -60,6 +60,7 @@ for (const file of [
   "scripts/check-config.mjs", "scripts/check-dispatcher-boundaries.mjs",
   "scripts/check-dispatcher.mjs", "scripts/check-gateway.mjs",
   "scripts/session-roundtrip.mjs", "scripts/check-lint.mjs",
+  "scripts/check-deployment.mjs",
   "infra/local-dev/openclaw/workflows/synthetic-issue.mjs",
   "docs/restart/evidence/lobster-prototype/crew-prototype.mjs",
 ]) {
@@ -79,7 +80,7 @@ try {
       "node_modules/eslint/bin/eslint.js", "--max-warnings=0", "--format=json", relative(root, file),
     ], { encoding: "utf8", timeout: 60_000 });
     assert.ifError(result.error);
-    assert.equal(result.status, rules.length ? 1 : 0, result.stderr || result.stdout);
+    assert.equal(result.status, rules.length ? 1 : 0, `${result.stderr || result.stdout}\nFixture: ${code}`);
     const messages = JSON.parse(result.stdout).flatMap((entry) => entry.messages);
     for (const rule of rules) assert.ok(messages.some((message) => message.ruleId === rule), rule);
     assert.ok(messages.every((message) => !message.fatal), result.stdout);
@@ -102,6 +103,74 @@ try {
   ]);
   check("safe.mjs", 'console.log("safe");', []);
   check("unsafe.mjs", "missingGlobal();", ["no-undef"]);
+  const rejectedImports = [
+    'import { exec as run } from "node:child_process"; console.log(run);',
+    'import * as processTools from "child_process"; console.log(processTools);',
+    'import vm from "node:vm"; console.log(vm);',
+    'import { getBuiltinModule } from "node:process"; console.log(getBuiltinModule);',
+    'import process from "process"; console.log(process);',
+    'import { createRequire } from "node:module"; console.log(createRequire);',
+    'export { exec } from "node:child_process";',
+    'export * from "openclaw/dist/internal.js";',
+    'import sdk from "openclaw/plugin-sdk/private"; console.log(sdk);',
+    'import "../docs/restart/evidence/lobster-prototype/crew-prototype.mjs";',
+    'export * from "../scripts/check-config.mjs";',
+  ];
+  for (const code of rejectedImports) check("restriction.mjs", code, ["no-restricted-imports"]);
+  for (const code of [
+    'const { exec: run } = require("child_process"); run("echo unsafe");',
+    'await import("node:child_process");',
+    'const name = "node:vm"; await import(name);',
+    'console.log({ shell: true });',
+    'const options = { shell: process.env.SHELL }; console.log(options);',
+    'const options = {}; options.shell = true;',
+    'const options = {}; options["shell"] = true;',
+    'const load = process.getBuiltinModule; console.log(load);',
+    'const load = process["getBuiltinModule"]; console.log(load);',
+    'process.getBuiltinModule("child_process");',
+    'process["getBuiltinModule"]("child_process");',
+    'const { getBuiltinModule } = process; getBuiltinModule("child_process");',
+    'const { getBuiltinModule: load } = process; load("child_process");',
+    'const { getBuiltinModule: load } = process; const { execSync } = load("child_process"); execSync("echo unsafe");',
+    'const processApi = process; const { getBuiltinModule: load } = processApi; const { execSync } = load("child_process"); execSync("echo unsafe");',
+    'const load = process.getBuiltinModule; const { execSync } = load("child_process"); execSync("echo unsafe");',
+  ]) check("restriction.mjs", code, ["no-restricted-syntax"]);
+  check("restriction.mjs", 'eval("console.log(1)");', ["no-eval"]);
+  check("restriction.mjs", 'setTimeout("console.log(1)", 1);', ["no-implied-eval"]);
+  check("restriction.mjs", 'console.log(new Function("return 1"));', ["no-new-func"]);
+  check("restriction.mjs", `
+    import { createHash } from "node:crypto";
+    import { callGatewayFromCli } from "openclaw/plugin-sdk/gateway-runtime";
+    export { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+    console.log(createHash, callGatewayFromCli);
+  `, []);
+  // Lint text at real exception paths to prove the rule is narrowed, not disabled.
+  for (const [file, safe, unsafe, expectedRule] of [
+    ...[
+      ["scripts/check-lint.mjs", "spawnSync"],
+      ["scripts/check-config.mjs", "spawnSync"],
+      ["scripts/check-gateway.mjs", "spawnSync"],
+      ["scripts/session-roundtrip.mjs", "spawnSync"],
+      ["scripts/check-dispatcher.mjs", "execFile"],
+    ].map(([file, name]) => [file,
+      `import { ${name} } from "node:child_process"; console.log(${name});`,
+      'import { exec as run } from "node:child_process"; console.log(run);', "no-restricted-imports"]),
+    ["scripts/check-config.mjs", 'import { spawnSync } from "node:child_process"; spawnSync("openclaw", [], {});',
+      'import { spawnSync } from "node:child_process"; const options = {}; options.shell = true; spawnSync(process.env.COMMAND, [], options);', "no-restricted-syntax"],
+    ["scripts/check-config.mjs", 'console.log(process.version);',
+      'import { getBuiltinModule } from "node:process"; const { execSync } = getBuiltinModule("node:child_process"); execSync("echo unsafe");', "no-restricted-imports"],
+    ["scripts/check-config.mjs", 'console.log(process.version);',
+      'const { getBuiltinModule: load } = process; const { execSync } = load("child_process"); execSync("echo unsafe");', "no-restricted-syntax"],
+    ["scripts/check-dispatcher-boundaries.mjs", 'import { createContext, runInContext } from "node:vm"; console.log(createContext, runInContext);',
+      'import vm from "node:vm"; console.log(vm);', "no-restricted-imports"],
+  ]) {
+    const accepted = await eslint.lintText(safe, { filePath: file });
+    assert.equal(accepted[0].errorCount, 0, JSON.stringify(accepted[0].messages));
+    const rejected = await eslint.lintText(unsafe, { filePath: file });
+    assert.ok(expectedRule, `Missing expected rule for ${file}: ${unsafe}`);
+    assert.ok(rejected[0].messages.some((message) => message.ruleId === expectedRule),
+      `${file}: expected ${expectedRule}; got ${JSON.stringify(rejected[0].messages)}`);
+  }
 } finally {
   rmSync(directory, { recursive: true, force: true });
 }

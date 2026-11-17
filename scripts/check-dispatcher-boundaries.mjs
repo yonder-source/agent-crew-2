@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
-import vm from "node:vm";
+import { createContext, runInContext } from "node:vm";
 
 const source = readFileSync(process.env.DISPATCHER_SOURCE ?? "dist/index.js", "utf8")
   .replace(/^import .*;\n/gm, "")
@@ -10,7 +10,7 @@ let session = null;
 let calls = [];
 const tools = new Map();
 let resolve;
-const context = vm.createContext({
+const context = createContext({
   createHash, randomUUID, process: { env: { AGENT_CREW_GATEWAY_TOKEN: "test" } },
   Type: new Proxy({}, { get: () => () => ({}) }),
   parseConfig: () => ({ environment: "test" }), definePluginEntry: (entry) => entry,
@@ -28,7 +28,7 @@ const context = vm.createContext({
     throw new Error(`Unexpected method: ${method}`);
   },
 });
-vm.runInContext(source, context);
+runInContext(source, context);
 context.entry.register({
   session: { state: { registerSessionExtension() {} } },
   registerTool: (tool) => tools.set(tool.name, tool),
