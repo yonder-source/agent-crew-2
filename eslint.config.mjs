@@ -3,7 +3,7 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 import { defineConfig } from "eslint/config";
 
-const restrictedModules = ["child_process", "node:child_process", "vm", "node:vm"];
+const restrictedModules = ["child_process", "node:child_process", "node:process", "vm", "node:vm"];
 const privateSdk = {
   regex: "^openclaw(?:/|$)(?!plugin-sdk/(?:gateway-runtime|plugin-entry)$)",
   message: "Use the reviewed public Gateway/plugin-entry SDK entry points.",
@@ -18,11 +18,11 @@ const syntaxRestrictions = [
     message: "Use static imports so API and dependency boundaries remain reviewable.",
   },
   {
-    selector: "CallExpression[callee.name='require'], MemberExpression[property.name='require'], MemberExpression[property.name='getBuiltinModule']",
+    selector: "CallExpression[callee.name='require'], MemberExpression[property.name='require'], MemberExpression[property.value='require'][computed=true], MemberExpression[property.name='getBuiltinModule'], MemberExpression[property.value='getBuiltinModule'][computed=true]",
     message: "Use static ESM imports; require aliases bypass import restrictions.",
   },
   {
-    selector: "Property[key.name='shell'], Property[key.value='shell']",
+    selector: "Property[key.name='shell'], Property[key.value='shell'], AssignmentExpression[left.property.name='shell'], AssignmentExpression[left.property.value='shell'][left.computed=true]",
     message: "Use a fixed executable and argument array without a shell option.",
   },
 ];

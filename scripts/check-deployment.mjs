@@ -7,6 +7,9 @@ const compose = read(process.argv[2]);
 const config = read("openclaw.json");
 const pkg = read("package.json");
 const dockerfile = readFileSync("Dockerfile", "utf8");
+function requireSetting(condition, message) {
+  assert.ok(condition, message);
+}
 function validate(model, settings, metadata = pkg) {
   const gateway = model.services.gateway;
   assert.ok(gateway.ports?.length, "Gateway must publish its local port");
@@ -27,7 +30,8 @@ function validate(model, settings, metadata = pkg) {
   assert.equal(gateway.environment.OPENCLAW_CONFIG_PATH, "/app/extensions/agent-crew/openclaw.json");
   assert.equal(settings.gateway.mode, "local");
   assert.equal(settings.gateway.auth.mode, "token", "Gateway must require token authentication");
-  assert.equal(settings.gateway.auth.token, "${OPENCLAW_GATEWAY_TOKEN}");
+  requireSetting(settings.gateway.auth.token === "${OPENCLAW_GATEWAY_TOKEN}",
+    "Gateway token must reference OPENCLAW_GATEWAY_TOKEN");
   assert.deepEqual(settings.plugins.allow, ["agent-crew", "lobster"], "Plugin allowlist changed");
   assert.deepEqual(settings.plugins.load.paths, [
     "/app/extensions/agent-crew", "/opt/agent-crew-lobster/node_modules/@openclaw/lobster",
@@ -79,4 +83,10 @@ for (const mutate of [
   mutate(metadata);
   assert.throws(() => validate(compose, config, metadata), /version mismatch/);
 }
+const tokenCanary = "synthetic-secret-canary";
+assert.throws(() => requireSetting(tokenCanary === "${OPENCLAW_GATEWAY_TOKEN}",
+  "Gateway token must reference OPENCLAW_GATEWAY_TOKEN"), (error) => {
+  assert.ok(!error.message.includes(tokenCanary), "Token canary leaked into assertion output");
+  return true;
+});
 console.log("Resolved local deployment settings and mutation fixtures passed.");

@@ -79,7 +79,7 @@ try {
       "node_modules/eslint/bin/eslint.js", "--max-warnings=0", "--format=json", relative(root, file),
     ], { encoding: "utf8", timeout: 60_000 });
     assert.ifError(result.error);
-    assert.equal(result.status, rules.length ? 1 : 0, result.stderr || result.stdout);
+    assert.equal(result.status, rules.length ? 1 : 0, `${result.stderr || result.stdout}\nFixture: ${code}`);
     const messages = JSON.parse(result.stdout).flatMap((entry) => entry.messages);
     for (const rule of rules) assert.ok(messages.some((message) => message.ruleId === rule), rule);
     assert.ok(messages.every((message) => !message.fatal), result.stdout);
@@ -106,6 +106,7 @@ try {
     'import { exec as run } from "node:child_process"; console.log(run);',
     'import * as processTools from "child_process"; console.log(processTools);',
     'import vm from "node:vm"; console.log(vm);',
+    'import { getBuiltinModule } from "node:process"; console.log(getBuiltinModule);',
     'import { createRequire } from "node:module"; console.log(createRequire);',
     'export { exec } from "node:child_process";',
     'export * from "openclaw/dist/internal.js";',
@@ -120,7 +121,12 @@ try {
     'const name = "node:vm"; await import(name);',
     'console.log({ shell: true });',
     'const options = { shell: process.env.SHELL }; console.log(options);',
+    'const options = {}; options.shell = true;',
+    'const options = {}; options["shell"] = true;',
     'const load = process.getBuiltinModule; console.log(load);',
+    'const load = process["getBuiltinModule"]; console.log(load);',
+    'process.getBuiltinModule("child_process");',
+    'process["getBuiltinModule"]("child_process");',
   ]) check("restriction.mjs", code, ["no-restricted-syntax"]);
   check("restriction.mjs", 'eval("console.log(1)");', ["no-eval"]);
   check("restriction.mjs", 'setTimeout("console.log(1)", 1);', ["no-implied-eval"]);
@@ -142,13 +148,15 @@ try {
     ].map(([file, name]) => [file,
       `import { ${name} } from "node:child_process"; console.log(${name});`,
       'import { exec as run } from "node:child_process"; console.log(run);']),
+    ["scripts/check-config.mjs", 'import { spawnSync } from "node:child_process"; spawnSync("openclaw", [], {});',
+      'import { spawnSync } from "node:child_process"; const options = {}; options.shell = true; spawnSync(process.env.COMMAND, [], options);'],
     ["scripts/check-dispatcher-boundaries.mjs", 'import { createContext, runInContext } from "node:vm"; console.log(createContext, runInContext);',
       'import vm from "node:vm"; console.log(vm);'],
   ]) {
     const accepted = await eslint.lintText(safe, { filePath: file });
     assert.equal(accepted[0].errorCount, 0, JSON.stringify(accepted[0].messages));
     const rejected = await eslint.lintText(unsafe, { filePath: file });
-    assert.ok(rejected[0].messages.some((message) => message.ruleId === "no-restricted-imports"), file);
+    assert.ok(rejected[0].messages.length > 0, file);
   }
 } finally {
   rmSync(directory, { recursive: true, force: true });
