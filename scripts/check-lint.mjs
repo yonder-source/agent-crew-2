@@ -108,6 +108,7 @@ try {
     'import * as processTools from "child_process"; console.log(processTools);',
     'import vm from "node:vm"; console.log(vm);',
     'import { getBuiltinModule } from "node:process"; console.log(getBuiltinModule);',
+    'import process from "process"; console.log(process);',
     'import { createRequire } from "node:module"; console.log(createRequire);',
     'export { exec } from "node:child_process";',
     'export * from "openclaw/dist/internal.js";',
@@ -128,6 +129,11 @@ try {
     'const load = process["getBuiltinModule"]; console.log(load);',
     'process.getBuiltinModule("child_process");',
     'process["getBuiltinModule"]("child_process");',
+    'const { getBuiltinModule } = process; getBuiltinModule("child_process");',
+    'const { getBuiltinModule: load } = process; load("child_process");',
+    'const { getBuiltinModule: load } = process; const { execSync } = load("child_process"); execSync("echo unsafe");',
+    'const processApi = process; const { getBuiltinModule: load } = processApi; const { execSync } = load("child_process"); execSync("echo unsafe");',
+    'const load = process.getBuiltinModule; const { execSync } = load("child_process"); execSync("echo unsafe");',
   ]) check("restriction.mjs", code, ["no-restricted-syntax"]);
   check("restriction.mjs", 'eval("console.log(1)");', ["no-eval"]);
   check("restriction.mjs", 'setTimeout("console.log(1)", 1);', ["no-implied-eval"]);
@@ -139,7 +145,7 @@ try {
     console.log(createHash, callGatewayFromCli);
   `, []);
   // Lint text at real exception paths to prove the rule is narrowed, not disabled.
-  for (const [file, safe, unsafe] of [
+  for (const [file, safe, unsafe, expectedRule] of [
     ...[
       ["scripts/check-lint.mjs", "spawnSync"],
       ["scripts/check-config.mjs", "spawnSync"],
@@ -148,16 +154,22 @@ try {
       ["scripts/check-dispatcher.mjs", "execFile"],
     ].map(([file, name]) => [file,
       `import { ${name} } from "node:child_process"; console.log(${name});`,
-      'import { exec as run } from "node:child_process"; console.log(run);']),
+      'import { exec as run } from "node:child_process"; console.log(run);', "no-restricted-imports"]),
     ["scripts/check-config.mjs", 'import { spawnSync } from "node:child_process"; spawnSync("openclaw", [], {});',
-      'import { spawnSync } from "node:child_process"; const options = {}; options.shell = true; spawnSync(process.env.COMMAND, [], options);'],
+      'import { spawnSync } from "node:child_process"; const options = {}; options.shell = true; spawnSync(process.env.COMMAND, [], options);', "no-restricted-syntax"],
+    ["scripts/check-config.mjs", 'console.log(process.version);',
+      'import { getBuiltinModule } from "node:process"; const { execSync } = getBuiltinModule("node:child_process"); execSync("echo unsafe");', "no-restricted-imports"],
+    ["scripts/check-config.mjs", 'console.log(process.version);',
+      'const { getBuiltinModule: load } = process; const { execSync } = load("child_process"); execSync("echo unsafe");', "no-restricted-syntax"],
     ["scripts/check-dispatcher-boundaries.mjs", 'import { createContext, runInContext } from "node:vm"; console.log(createContext, runInContext);',
-      'import vm from "node:vm"; console.log(vm);'],
+      'import vm from "node:vm"; console.log(vm);', "no-restricted-imports"],
   ]) {
     const accepted = await eslint.lintText(safe, { filePath: file });
     assert.equal(accepted[0].errorCount, 0, JSON.stringify(accepted[0].messages));
     const rejected = await eslint.lintText(unsafe, { filePath: file });
-    assert.ok(rejected[0].messages.length > 0, file);
+    assert.ok(expectedRule, `Missing expected rule for ${file}: ${unsafe}`);
+    assert.ok(rejected[0].messages.some((message) => message.ruleId === expectedRule),
+      `${file}: expected ${expectedRule}; got ${JSON.stringify(rejected[0].messages)}`);
   }
 } finally {
   rmSync(directory, { recursive: true, force: true });

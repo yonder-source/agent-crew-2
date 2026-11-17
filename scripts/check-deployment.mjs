@@ -84,9 +84,11 @@ for (const mutate of [
   assert.throws(() => validate(compose, config, metadata), /version mismatch/);
 }
 const tokenCanary = "synthetic-secret-canary";
-assert.throws(() => requireSetting(tokenCanary === "${OPENCLAW_GATEWAY_TOKEN}",
-  "Gateway token must reference OPENCLAW_GATEWAY_TOKEN"), (error) => {
-  assert.ok(!error.message.includes(tokenCanary), "Token canary leaked into assertion output");
+const tokenSettings = structuredClone(config);
+tokenSettings.gateway.auth.token = tokenCanary;
+assert.throws(() => validate(compose, tokenSettings), (error) => {
+  assert.match(error.message, /Gateway token must reference OPENCLAW_GATEWAY_TOKEN/);
+  assert.ok(!error.message.includes(tokenCanary), "Token canary leaked into validation output");
   return true;
 });
 console.log("Resolved local deployment settings and mutation fixtures passed.");

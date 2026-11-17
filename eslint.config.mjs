@@ -3,7 +3,8 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 import { defineConfig } from "eslint/config";
 
-const restrictedModules = ["child_process", "node:child_process", "node:process", "vm", "node:vm"];
+const processLoaders = ["process", "node:process"];
+const restrictedModules = ["child_process", "node:child_process", ...processLoaders, "vm", "node:vm"];
 const privateSdk = {
   regex: "^openclaw(?:/|$)(?!plugin-sdk/(?:gateway-runtime|plugin-entry)$)",
   message: "Use the reviewed public Gateway/plugin-entry SDK entry points.",
@@ -20,6 +21,10 @@ const syntaxRestrictions = [
   {
     selector: "CallExpression[callee.name='require'], MemberExpression[property.name='require'], MemberExpression[property.value='require'][computed=true], MemberExpression[property.name='getBuiltinModule'], MemberExpression[property.value='getBuiltinModule'][computed=true]",
     message: "Use static ESM imports; require aliases bypass import restrictions.",
+  },
+  {
+    selector: "Property[key.name='getBuiltinModule'], Property[key.value='getBuiltinModule'][computed=true]",
+    message: "Do not extract process loaders; use static ESM imports so dependency boundaries remain reviewable.",
   },
   {
     selector: "Property[key.name='shell'], Property[key.value='shell'], AssignmentExpression[left.property.name='shell'], AssignmentExpression[left.property.value='shell'][left.computed=true]",
@@ -52,7 +57,7 @@ export default defineConfig([
     files: [file],
     rules: {
       "no-restricted-imports": restrictImports([
-        "vm", "node:vm",
+        ...processLoaders, "vm", "node:vm",
         ...["child_process", "node:child_process"].map((name) => ({
           name, allowImportNames: [allowed], message: `Only ${allowed} is approved for this fixture.`,
         })),
@@ -64,7 +69,7 @@ export default defineConfig([
     files: ["scripts/check-dispatcher-boundaries.mjs"],
     rules: {
       "no-restricted-imports": restrictImports([
-        "child_process", "node:child_process",
+        ...processLoaders, "child_process", "node:child_process",
         ...["vm", "node:vm"].map((name) => ({
           name, allowImportNames: ["createContext", "runInContext"],
           message: "Only the compiled dispatcher VM harness operations are approved.",
