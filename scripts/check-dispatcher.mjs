@@ -38,6 +38,32 @@ async function ready() {
     try { await call("health", {}); return true; } catch { return false; }
   });
 }
+async function waitForStopped() {
+  const { stdout } = await compose("ps", "-a", "-q", "gateway");
+  const containerId = stdout.trim();
+  assert.ok(containerId, "Gateway container must exist after SIGKILL");
+  const deadline = Date.now() + 30_000;
+  let state;
+  try {
+    while (Date.now() < deadline) {
+      const result = await exec("docker", ["inspect", "--format", "{{json .State}}", containerId],
+        { timeout: Math.max(1, Math.min(5_000, deadline - Date.now())) });
+      state = JSON.parse(result.stdout);
+      if (state.Running === false && state.Restarting === false) return;
+      await setTimeout(Math.min(500, Math.max(0, deadline - Date.now())));
+    }
+    throw new Error("Timed out waiting for Gateway to stop after SIGKILL");
+  } catch (error) {
+    console.error("Gateway state after SIGKILL:", state);
+    try {
+      const logs = await compose("logs", "--tail", "100", "gateway");
+      console.error(logs.stdout, logs.stderr);
+    } catch (logError) {
+      console.error("Could not read Gateway logs:", logError.message);
+    }
+    throw error;
+  }
+}
 const hold = () => inside("touch", `${root}.hold`);
 const release = () => inside("rm", "-f", `${root}.hold`);
 
@@ -71,6 +97,7 @@ const starting = await status(3);
 assert.equal(starting.status, "starting");
 // A real process interruption after admission persistence and before result storage.
 await compose("kill", "-s", "SIGKILL", "gateway");
+await waitForStopped();
 await interrupted;
 await ready();
 assert.equal((await status(1)).job.jobId, a.job.jobId);
@@ -91,6 +118,7 @@ await hold();
 const abandonedRun = dispatch(4).catch(() => undefined);
 await until(async () => await count() === 5);
 await compose("kill", "-s", "SIGKILL", "gateway");
+await waitForStopped();
 await abandonedRun;
 await ready();
 assert.equal((await resolve(4, "abandon")).job.status, "abandoned");
