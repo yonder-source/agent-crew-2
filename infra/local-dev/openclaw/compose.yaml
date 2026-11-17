@@ -11,6 +11,7 @@ services:
     command: ["openclaw", "gateway", "--allow-unconfigured", "--bind", "lan"]
     environment:
       OPENCLAW_GATEWAY_TOKEN: disposable-agent-crew-token
+      AGENT_CREW_GATEWAY_TOKEN: disposable-agent-crew-token
       OPENCLAW_CONFIG_PATH: /app/extensions/agent-crew/openclaw.json
     ports:
       - "127.0.0.1:18789:18789"

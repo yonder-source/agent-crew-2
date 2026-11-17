@@ -44,17 +44,37 @@ small OpenClaw integration; it does not implement this workflow.
   adjust after observing actual runs. A pause for human input ends the current
   Lobster call; the next resume is a separate call.
 
-## WBS2 runtime qualification
+## WBS2 dispatcher
 
-The pinned OpenClaw `2026.11.3` SDK exposes session-extension registration but
-no plugin-session extension read/write operation. Its durable keyed plugin
-state store is a candidate for the smallest persistent admission record. The
-native `sessions.pluginPatch` path requires `operator.admin`, so it is not the
-dispatcher admission interface. Lobster is an optional separately installed
-plugin; a supported invocation bridge from the user-installed Agent Crew
-plugin still needs qualification. WBS2 remains incomplete until that bridge,
-duplicate handling, restart interruption and operator inspection pass a
-disposable Gateway integration check. See [WBS2](docs/restart/wbs2.md).
+Use the public, authenticated Gateway API to create native issue sessions and
+read/write the registered `agent-crew-job` session extension. The dispatcher
+runs in the Gateway plugin and uses the supported SDK `callGatewayFromCli`
+client with an explicitly supplied `AGENT_CREW_GATEWAY_TOKEN` and loopback
+endpoint. This credential needs operator permission for session metadata
+mutation; it is never a tool argument or result. This is the initial co-located
+Controller capability. A custom agent harness is not required: the ownership
+restriction on the SDK's plugin session-creation helper does not apply to the
+operator `sessions.create` API.
+
+One queue per Gateway installation serializes admission and Lobster calls.
+Normalize repository names and derive a stable session key from repository and
+issue number. Persist `starting` with a job ID and process-generation ID before
+invoking the fixed synthetic workflow through `tools.invoke`. Interpret both
+the Gateway `ok/output` envelope and Lobster's result; record status and any
+returned continuation token. Completed, active, abandoned and uncertain work
+blocks another start. Status reads remain available while a workflow is running.
+
+A retained `starting` record from a previous process generation is reported as
+`needs-inspection`, without automatic restart. The operator-only
+`agent-crew.resolve` Gateway method requires `operator.admin` and an inspection
+note; `retry` permits one new attempt, while `abandon` keeps the issue blocked.
+The next attempt retains the latest operator decision. This boundary assumes
+one Gateway owns its state volume; it is not a distributed admission lock.
+
+The pinned Lobster plugin is installed into the Docker image, so container
+replacement does not lose its executable path. WBS2 uses synthetic issues and
+workflows only. The executable qualification and its limits are recorded in
+[WBS2](docs/restart/wbs2.md).
 
 ## Error handling and retries
 

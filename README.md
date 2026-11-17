@@ -36,21 +36,21 @@ Rebuild after source changes. Builds do not write generated files into the host
 checkout, so they also work with CI checkout ownership.
 
 Run the complete local check, including plugin status and session metadata
-surviving a Gateway restart:
+surviving a Gateway restart, plus synthetic dispatcher interruption checks:
 
 ```sh
 ./scripts/check-all.sh
 ```
 
 Gateway state is stored in the named Docker volume `agent-crew-2_openclaw-data`
-(Compose prefixes the volume with the checkout directory name). Remove this
-disposable state with `docker compose down --volumes`.
+(Compose prefixes the volume with its project name). Remove this disposable
+state with `docker compose -f infra/local-dev/openclaw/compose.yaml down --volumes`.
 
 ## Disposable session check
 
 `scripts/check-all.sh` uses its own temporary Compose project and volume, then
 removes those resources when the checks finish. It starts the Gateway with a fixed test token and
-`environment: disposable`, invokes `agent_crew_status`, writes and reads
+`environment: disposable`, invokes `agent_crew_environment`, writes and reads
 synthetic `agent-crew-job` metadata on session
 `agent:main:agent-crew-wbs1`, restarts the Gateway, then reads the metadata
 again. It uses no external credentials. The token is only for local disposable
@@ -59,3 +59,25 @@ use and must not be reused elsewhere.
 Pull request CI runs the same Docker type/config checks and the Gateway status
 and restart-persistence integration check. Docker availability is required on
 the runner.
+
+## Synthetic WBS2 dispatcher
+
+The image includes `@openclaw/lobster@2026.11.3`. Tools `agent_crew_dispatch`
+and `agent_crew_status` accept
+`repository` (owner/name) and a positive `issueNumber`. The Gateway plugin uses
+`AGENT_CREW_GATEWAY_TOKEN` for authenticated loopback calls; local Compose
+supplies its disposable operator token. The native issue session's
+`agent-crew-job` extension holds admission and workflow status.
+
+The operator Gateway method `agent-crew.resolve` accepts the same issue fields,
+`decision` (`retry` or `abandon`) and a nonempty inspection `note`. It requires
+`operator.admin` and only accepts `needs-inspection` work. Retry authorizes a
+new dispatch; it does not automatically resume a possibly running workflow.
+
+`./scripts/check-all.sh` also runs `scripts/check-dispatcher.mjs` (host Node.js
+required). It counts actual synthetic Lobster executions, checks duplicate and
+ordered admission, kills the Gateway during a paused workflow, and verifies
+restart blocking and explicit operator decisions. Its fixed workflow only
+writes a disposable execution log and returns a synthetic result; it performs
+no coding, GitHub or Slack actions. It uses and removes its own Compose project
+and volume and needs local port 18789 available.

@@ -33,7 +33,7 @@ check it on subsequent requests, including after a Gateway restart.
 
 **Done when:** Two requests for the same synthetic issue result in one workflow
 start and a response identifying the existing work. Requests for different
-issues are processed in order. See [duplicate dispatch](../../SPEC.md#admission-and-uncertain-outcomes).
+issues are processed in order. See [duplicate dispatch](../../SPEC.md#error-duplicate).
 
 ## 2.3 Lobster workflow start
 
@@ -43,7 +43,7 @@ selected version's supported API.
 
 **Done when:** A request creates a session, starts the synthetic workflow and
 shows its result through the session. Repeating the same request recognizes the
-existing work without starting a second workflow. See [duplicate dispatch](../../SPEC.md#admission-and-uncertain-outcomes).
+existing work without starting a second workflow. See [duplicate dispatch](../../SPEC.md#error-duplicate).
 
 ## 2.4 Operator status and uncertain outcomes
 
@@ -56,7 +56,7 @@ needs-inspection work. A repeat request for work needing inspection does not
 start another workflow until the operator has inspected and explicitly decided
 how to proceed. An interrupted start whose outcome is unknown remains blocked
 after restart, including when no Lobster reference was returned.
-See [uncertain outcomes](../../SPEC.md#admission-and-uncertain-outcomes).
+See [uncertain outcomes](../../SPEC.md#error-uncertain).
 
 ## 2.5 Integration check and handoff
 
@@ -81,13 +81,26 @@ state or recovery behavior only when those slices demonstrate a need.
 
 ## Runtime qualification note
 
-The pinned `2026.11.3` SDK exposes session-extension registration but no
-plugin-session extension read/write operation. The recorded native
-`sessions.pluginPatch` path requires `operator.admin`; it is not a safe
-dispatcher admission primitive for a regular plugin tool. The SDK does provide
-a durable plugin-owned keyed state store, which is the candidate for the
-smallest persistent admission record. Lobster is an optional separately
-installed tool, and the matching SDK documents no general tool-to-tool invoke
-API for user-installed plugins. Resolve a supported dispatch bridge and verify
-it against the pinned Gateway before treating WBS2 as implemented or starting
-WBS3.
+The pinned SDK's plugin-owned session helper requires a custom harness, but the
+public operator `sessions.create` API creates the required native session.
+The dispatcher uses the supported authenticated Gateway client for session
+metadata and Lobster invocation. No custom harness or standalone Lobster CLI
+is needed. `tools.invoke` returns an outer `ok/output` envelope; Lobster's
+workflow status is inside `output.details`. An `internal_error` from an invalid
+pipeline does not establish that the tool is unavailable.
+
+Run `./scripts/check-all.sh` from the repository root. Its disposable Gateway
+uses the image-installed `@openclaw/lobster@2026.11.3`, synthetic issues and a
+fixed workflow. The workflow records each real execution and supports a
+file-controlled pause for interruption testing. The check covers native
+session metadata, duplicate suppression, distinct-issue serialization,
+SIGKILL after the durable start marker and before result storage, retained
+inspection blocking, explicit retry, abandonment and restart persistence.
+The complete clean-state check passed: five actual workflow executions across
+four issues, including one explicitly approved retry; duplicates and restart
+inspection did not add executions. Both interruption cases used SIGKILL on a
+running Gateway, and abandonment remained blocked after another restart.
+These checks do not exercise GitHub, coding agents, Slack or cloud deployment.
+
+See the [root dispatcher contract](../../SPEC.md#wbs2-dispatcher) for the
+credential, state and operator-control decisions.

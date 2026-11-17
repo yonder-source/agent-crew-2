@@ -31,7 +31,7 @@ workflow status to the configured channel.
 **Done when:** A test workflow produces a Slack message identifying the issue
 and its status. A simulated delivery failure is visible to the operator and
 does not misrepresent the workflow or publication outcome.
-See [Slack delivery failures](../../SPEC.md#admission-and-uncertain-outcomes).
+See [Slack delivery failures](../../SPEC.md#error-slack).
 
 ## 6.3 Report the draft PR
 
@@ -41,7 +41,7 @@ assigned issue and draft PR URL.
 **Done when:** A successful publication produces a Slack message with the
 correct issue and PR link. An unsuccessful publication reports its status
 without claiming a PR was created.
-See [workflow failures](../../SPEC.md#admission-and-uncertain-outcomes).
+See [workflow failures](../../SPEC.md#error-workflow).
 
 ## 6.4 Exercise the MVP workflow
 

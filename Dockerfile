@@ -1,4 +1,7 @@
 FROM ghcr.io/openclaw/openclaw:2026.11.3@sha256:e73f689d663567f0fe3c5a85c54beb3e102dc21f0814bf375e9039ee2d2df51b AS base
+USER root
+RUN npm install --prefix /opt/agent-crew-lobster --omit=dev --ignore-scripts @openclaw/lobster@2026.11.3
+USER node
 
 FROM base AS build
 USER root
@@ -28,6 +31,7 @@ RUN mkdir -p /app/extensions/agent-crew && chown node:node /app/extensions/agent
 WORKDIR /app/extensions/agent-crew
 COPY --from=build --chown=node:node /app/extensions/agent-crew/dist ./dist
 COPY --chown=node:node package.json openclaw.plugin.json openclaw.json ./
+COPY --chown=node:node infra/local-dev/openclaw/workflows ./workflows
 COPY --chown=node:node scripts/check-gateway.mjs scripts/session-roundtrip.mjs ./scripts/
 USER node
 CMD ["openclaw", "gateway", "--allow-unconfigured"]

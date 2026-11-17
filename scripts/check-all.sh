@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-COMPOSE_PROJECT_NAME=agent-crew-wbs1-check
+COMPOSE_PROJECT_NAME=agent-crew-wbs2-check
 COMPOSE_FILE=infra/local-dev/openclaw/compose.yaml
 export COMPOSE_PROJECT_NAME
 export COMPOSE_FILE
@@ -36,3 +36,5 @@ until docker compose exec -T gateway openclaw gateway health --port 18789 --toke
   sleep 1
 done
 docker compose exec -T gateway node scripts/session-roundtrip.mjs --verify-only
+
+node scripts/check-dispatcher.mjs
