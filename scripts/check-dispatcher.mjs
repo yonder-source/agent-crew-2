@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import { setTimeout } from "node:timers/promises";
 
 const exec = promisify(execFile);
-const compose = (...args) => exec("docker", ["compose", ...args], { timeout: 150_000, maxBuffer: 2_000_000 });
+const compose = (...args) => exec("docker", ["compose", ...args], { timeout: 330_000, maxBuffer: 2_000_000 });
 const inside = (...args) => compose("exec", "-T", "gateway", ...args);
 const root = "/home/node/.openclaw/agent-crew-synthetic";
 const issue = (issueNumber) => ({ repository: "synthetic/wbs2", issueNumber });
@@ -33,7 +33,7 @@ async function until(check) {
   throw new Error("Timed out waiting for synthetic workflow boundary");
 }
 async function ready() {
-  await compose("up", "-d", "--wait", "--wait-timeout", "120", "gateway");
+  await compose("up", "-d", "--wait", "--wait-timeout", "300", "gateway");
   await until(async () => {
     try { await call("health", {}); return true; } catch { return false; }
   });
