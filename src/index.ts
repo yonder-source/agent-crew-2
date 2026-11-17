@@ -21,6 +21,18 @@ type Job = Issue & {
   decision?: string;
 };
 
+// Explicit output boundary: continuation credentials stay in session metadata.
+function publicJob(job: Job) {
+  return {
+    repository: job.repository, number: job.number, jobId: job.jobId,
+    sessionKey: job.sessionKey, status: job.status, bootId: job.bootId,
+    updatedAt: job.updatedAt,
+    ...(job.workflowStatus !== undefined ? { workflowStatus: job.workflowStatus } : {}),
+    ...(job.error !== undefined ? { error: job.error } : {}),
+    ...(job.decision !== undefined ? { decision: job.decision } : {}),
+  };
+}
+
 function parseIssue(repository: unknown, number: unknown): Issue {
   if (typeof repository !== "string" || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) {
     throw new Error("repository must use owner/name format");
@@ -56,7 +68,20 @@ export default definePluginEntry({
     };
     const describe = async (issue: Issue) => {
       const response = await call("sessions.describe", { key: sessionKey(issue) });
-      return response.session as { pluginExtensions?: Array<{ pluginId: string; namespace: string; value: unknown }> } | null;
+      const session: unknown = response.session;
+      if (session === null) return null;
+      if (typeof session !== "object" || Array.isArray(session)) {
+        throw new Error("Invalid Gateway session response; operator inspection required");
+      }
+      const extensions = (session as { pluginExtensions?: unknown }).pluginExtensions;
+      if (extensions === undefined) return [];
+      if (!Array.isArray(extensions) || extensions.some((item: unknown) =>
+        typeof item !== "object" || item === null || Array.isArray(item) ||
+        typeof (item as { pluginId?: unknown }).pluginId !== "string" ||
+        typeof (item as { namespace?: unknown }).namespace !== "string")) {
+        throw new Error("Invalid session extensions; operator inspection required");
+      }
+      return extensions as Array<{ pluginId: string; namespace: string; value: unknown }>;
     };
     const writeJob = async (issue: Issue, job: Job): Promise<void> => {
       await call("sessions.pluginPatch", {
@@ -70,9 +95,9 @@ export default definePluginEntry({
       return result;
     };
 
-    const readJob = async (issue: Issue): Promise<Job | undefined> => {
-      const session = await describe(issue);
-      const value = session?.pluginExtensions?.find((item) => item.pluginId === "agent-crew" && item.namespace === NAMESPACE)?.value;
+    const readJob = async (issue: Issue, session = describe(issue)): Promise<Job | undefined> => {
+      const extensions = await session;
+      const value = extensions?.find((item) => item.pluginId === "agent-crew" && item.namespace === NAMESPACE)?.value;
       if (value === undefined) return undefined;
       const job = value as Job;
       if (!job || job.repository !== issue.repository || job.number !== issue.number ||
@@ -106,7 +131,7 @@ export default definePluginEntry({
       async execute(_id: string, params: { repository: string; issueNumber: number }) {
         const issue = parseIssue(params.repository, params.issueNumber);
         const job = await readJob(issue);
-        const details = { status: job?.status ?? "not-started", ...(job ? { job } : {}) };
+        const details = { status: job?.status ?? "not-started", ...(job ? { job: publicJob(job) } : {}) };
         return { content: [{ type: "text" as const, text: JSON.stringify(details) }], details };
       },
     };
@@ -124,9 +149,10 @@ export default definePluginEntry({
       async execute(_id: string, params: { repository: string; issueNumber: number }) {
         const issue = parseIssue(params.repository, params.issueNumber);
         const result = await serialize(async () => {
-          const existing = await readJob(issue);
+          const session = describe(issue);
+          const existing = await readJob(issue, session);
           if (existing && LOCKED.has(existing.status)) return existing;
-          if (!(await describe(issue))) await call("sessions.create", { key: sessionKey(issue) });
+          if ((await session) === null) await call("sessions.create", { key: sessionKey(issue) });
           const job = { ...baseJob(issue), ...(existing?.decision ? { decision: existing.decision } : {}) };
           await writeJob(issue, job);
           try {
@@ -167,7 +193,8 @@ export default definePluginEntry({
             return uncertain;
           }
         });
-        return { content: [{ type: "text" as const, text: JSON.stringify(result) }], details: { status: result.status, job: result } };
+        const job = publicJob(result);
+        return { content: [{ type: "text" as const, text: JSON.stringify(job) }], details: { status: job.status, job } };
       },
     });
 
@@ -194,7 +221,7 @@ export default definePluginEntry({
             await writeJob(issue, next);
             return next;
           });
-          respond(true, { job: updated });
+          respond(true, { job: publicJob(updated) });
         } catch (error) {
           respond(false, undefined, {
             code: "INVALID_OPERATOR_RESOLUTION",

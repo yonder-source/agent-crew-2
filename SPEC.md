@@ -61,7 +61,10 @@ Normalize repository names and derive a stable session key from repository and
 issue number. Persist `starting` with a job ID and process-generation ID before
 invoking the fixed synthetic workflow through `tools.invoke`. Interpret both
 the Gateway `ok/output` envelope and Lobster's result; record status and any
-returned continuation token. Completed, active, abandoned and uncertain work
+returned continuation token internally. Tool results and operator-resolution
+responses expose only public job fields, excluding continuation credentials.
+Malformed session extensions block admission with an inspection error.
+Completed, active, abandoned and uncertain work
 blocks another start. Status reads remain available while a workflow is running.
 
 A retained `starting` record from a previous process generation is reported as

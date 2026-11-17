@@ -22,8 +22,8 @@ RUN tsc --noEmit false
 
 FROM build AS checks
 COPY --chown=node:node openclaw.json ./
-COPY --chown=node:node scripts/check-config.mjs ./scripts/
-CMD ["sh", "-lc", "tsc --noEmit && node scripts/check-config.mjs"]
+COPY --chown=node:node scripts/check-config.mjs scripts/check-dispatcher-boundaries.mjs ./scripts/
+CMD ["sh", "-lc", "tsc --noEmit && node scripts/check-config.mjs && node scripts/check-dispatcher-boundaries.mjs"]
 
 FROM base AS runtime
 USER root
