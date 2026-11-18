@@ -16,10 +16,12 @@ and enforcement during implementation.
    agent credentials. Prepare reviewable proposed settings before applying
    externally visible permission changes.
 4. Configure server-side protection for `main`: require pull requests and
-   passing `check-all`; block direct updates, force pushes and deletion. Do not
-   require an approval count or configure a push allowlist. Give coding agents
-   feature-branch/PR permissions only; do not grant ruleset administration or
-   bypass. The owner retains admin authority and can change or bypass controls.
+   passing the `Gateway checks` status; block force pushes and deletion. This
+   GitHub Actions job runs `./scripts/check-all.sh`. Enable `Restrict updates`
+   for `main`, with Repository administrators as the only bypass actor and
+   `For pull requests only` as bypass mode. Do not require an approval count or
+   give coding agents ruleset administration or bypass. The owner retains
+   admin authority and can change the ruleset.
    Confirm plan support and actual enforcement before claiming it is active.
 5. Assess Git's native push safeguards for the local workflow, including
    `push.default=simple` and `branch.autoSetupMerge=simple`. Verify how creating
@@ -51,3 +53,32 @@ agent authority limits where permissions allow. Record actual settings and
 tested bypass paths. If a check cannot be exercised, record it as pending
 rather than claiming enforcement from files. Keep findings and the chosen
 operating contract in SPEC.
+
+## Implementation findings
+
+- GitHub connector reads show a public repository with default branch `main`,
+  no repository or inherited rulesets, and `main.protected=false` with required
+  status checks disabled. The dedicated branch-protection endpoint is not
+  readable through the connector, but the public branch response reports the
+  branch as unprotected.
+- The required status context is `Gateway checks` (the CI job name); its step
+  runs `./scripts/check-all.sh`. It is not named `check-all` in GitHub checks.
+- The local checkout has no explicit `push.default`, `branch.autoSetupMerge` or
+  `core.hooksPath`. Git's effective `push.default=simple` rejects a default
+  push when the feature branch tracks `origin/main`; with
+  `branch.autoSetupMerge=simple`, a branch created from `origin/main` has no
+  upstream and a default push fails until the branch is published. Explicit
+  same-name publication and subsequent default push succeed in an isolated
+  bare-repository check. A synthetic receive hook rejected direct, force and
+  delete updates to `main`; this does not prove GitHub enforcement.
+- VS Code 1.146.0 is installed. Its documented Publish Branch action is shown
+  when a branch has no upstream and sets the upstream when publishing. An
+  explicit target remains possible; the server-side ruleset is necessary to
+  enforce the boundary.
+- The user accepted `Restrict updates` for `main`, with Repository
+  administrators as the only bypass actor and `For pull requests only` as
+  bypass mode. This prevents Write-level coding agents from merging or directly
+  updating `main`; the owner keeps authority to change the ruleset. The required
+  CI status does not protect its own definition: a PR could keep the `Gateway
+  checks` job name while weakening its steps, so the owner reviews workflow
+  changes before merging.
