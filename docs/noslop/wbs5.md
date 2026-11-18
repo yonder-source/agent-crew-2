@@ -1,6 +1,7 @@
 # WBS5 — Acceptance and reuse handoff
 
-Status: planned. Depends on WBS1–4.
+Status: implementation and clean-checkout suite complete; final PR CI pending.
+Depends on WBS1–4.
 
 ## Settled scope
 
@@ -51,13 +52,24 @@ The user reviews this completed implementation before extracting a general
 Node.js/TypeScript/Docker specification or shared skill set. This package
 prepares that evidence and inventory.
 
+## Implementation evidence
+
+- `./scripts/check-all.sh` passed in a clean detached worktree at commit
+  `ab0757f`, using the committed lockfile and pinned checks image. It covered
+  deployment assertions, lint CLI fixtures, type/config checks, dispatcher mock
+  boundaries, pinned Gateway status/session checks across restart, and synthetic
+  dispatcher duplicate/crash/retry/abandon behavior. See local `project-memory.md`
+  for the run record. The final PR CI run is pending.
+- WBS4 GitHub ruleset application and live agent-authority checks remain
+  deferred; no live server-side enforcement is claimed.
+
 ## Reuse inventory
 
 | Candidate | Classification | Concrete assets | Dependencies or replacements | Evidence and limits |
 | --- | --- | --- | --- | --- |
 | Source/check coverage inventory | Configurable by repository | `docs/noslop/rules.md`, `docs/noslop/wbs0.md` | Replace source paths, risk areas and native check references for each repository. | Static inventory rechecked against source and checks; no runtime guarantee. |
-| Typed lint, compiler and reproducible Docker check stage | Configurable by repository | `eslint.config.mjs`, `tsconfig.json`, `Dockerfile`, `package-lock.json`, `scripts/check-lint.mjs`, `scripts/check-all.sh`, `.github/workflows/ci.yml` | Node.js/TypeScript versions, SDK declarations, linted source inventory, image digest and CI runner requirements vary by repo. | WBS1 Docker suite and PR CI evidence; rules/presets are reusable, configuration and versions are not universal. |
-| Native ESLint restrictions and resolved Compose assertions | Configurable by repository | `eslint.config.mjs`, `scripts/check-lint.mjs`, `scripts/check-deployment.mjs`, `docs/noslop/wbs2.md` | Select restrictions from demonstrated repository risks; replace Compose assertions and narrow path/operation exceptions. | Accepted/rejected lint fixtures and deployment mutation fixtures in the shared suite; no live deployment acceptance. |
-| Canary, failure-injection and guard-removal methods | Configurable by repository | `scripts/check-dispatcher-boundaries.mjs`, `scripts/check-dispatcher.mjs`, `docs/noslop/wbs3.md` | The test techniques transfer; adapt injected boundaries, secret canaries, expected state transitions and mutation targets to each system. | Mock boundary and native synthetic Gateway checks, including guard-removal results; no live GitHub/Slack acceptance. |
-| Gateway session, Lobster continuation and operator-resolution behavior | Agent Crew-specific | `src/index.ts`, `scripts/session-roundtrip.mjs`, `scripts/check-dispatcher.mjs`, `docs/noslop/wbs3.md` | Requires OpenClaw Gateway session metadata, Lobster and Agent Crew job/status contracts; another stack needs replacement. | Pinned local Gateway synthetic integration and restart/failure checks. |
-| Solo-maintainer merge and change-authority proposal | Configurable by repository | `SPEC.md`, this WBS4 operating contract, `docs/noslop/wbs4.md` | Requires adapting actor roles, branch names, GitHub plan/capabilities and credential model. | Isolated bare-repository and documented VS Code push behavior only. GitHub rulesets and agent permissions remain deferred and unverified. |
+| Typed lint, compiler and reproducible Docker check stage | Configurable by repository | `eslint.config.mjs`, `tsconfig.json`, `Dockerfile`, `package-lock.json`, `scripts/check-lint.mjs`, `scripts/check-all.sh`, `.github/workflows/ci.yml` | Node.js 24.22.1; TypeScript 5.9.3; ESLint 10.15.0; typescript-eslint 8.73.0; `@eslint/js` 10.0.1; `globals` 17.14.0. The pinned OpenClaw 2026.11.3 image supplies the matching SDK declarations. Replace pins, declarations and source coverage for the target repo. | WBS1 Docker suite and PR CI. Rules/presets are reusable; toolchain and image pins are not universal. |
+| Native ESLint restrictions and resolved Compose assertions | Configurable by repository | `eslint.config.mjs`, `scripts/check-lint.mjs`, `scripts/check-deployment.mjs`, `docs/noslop/wbs2.md` | Uses ESLint built-in rules and Node.js assertions with Docker Compose v2 JSON output; no added dependency-graph package. Select restrictions from demonstrated risks and replace Compose assertions and narrow exceptions. | Accepted/rejected lint fixtures and deployment mutation fixtures in the shared suite; no live deployment acceptance. |
+| Canary, failure-injection and guard-removal methods | Configurable by repository | `scripts/check-dispatcher-boundaries.mjs`, `scripts/check-dispatcher.mjs`, `docs/noslop/wbs3.md` | Uses Node.js built-ins and repository-specific fixtures. The techniques transfer; adapt injected boundaries, secret canaries, state transitions and mutation targets. | Mock boundary and native synthetic Gateway checks, including guard-removal results; no live GitHub/Slack acceptance. |
+| Gateway session, Lobster continuation and operator-resolution behavior | Agent Crew-specific | `src/index.ts`, `scripts/session-roundtrip.mjs`, `scripts/check-dispatcher.mjs`, `docs/noslop/wbs3.md` | Requires OpenClaw Gateway session metadata, `@openclaw/lobster` 2026.11.3 and Agent Crew job/status contracts; another stack needs replacement. | Pinned local Gateway synthetic integration and restart/failure checks. |
+| Solo-maintainer merge and change-authority proposal | Configurable by repository | `SPEC.md`, this WBS4 operating contract, `docs/noslop/wbs4.md` | Depends on GitHub ruleset availability, repository roles/plan and credential model; adapt actor roles, branch patterns and Git/VS Code push behavior. | Isolated bare-repository check and documented VS Code behavior only. GitHub rulesets and agent permissions remain deferred and unverified. |
