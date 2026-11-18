@@ -105,8 +105,31 @@ assert.equal((await dispatch(1)).status, "completed");
 assert.equal((await status(3)).status, "needs-inspection");
 assert.equal((await dispatch(3)).job.jobId, starting.job.jobId);
 assert.equal(await count(), 3, "Restart must not relaunch uncertain work");
+const beforeDenied = await status(3);
+const lowScope = `
+  import { callGatewayFromCli } from "/app/dist/plugin-sdk/gateway-runtime.js";
+  const options = { url: "ws://127.0.0.1:18789", token: "disposable-agent-crew-token", timeout: "30000", json: true };
+  const scope = { scopes: ["operator.read"] };
+  await callGatewayFromCli("health", options, {}, scope);
+  try {
+    await callGatewayFromCli("agent-crew.resolve", options,
+      ${JSON.stringify({ ...issue(3), decision: "retry", note: "low scope" })}, scope);
+    process.exitCode = 1;
+    console.error("Resolution unexpectedly succeeded with operator.read");
+  } catch (error) {
+    if (!String(error).includes("operator.admin")) throw error;
+    console.log("Low-scope resolution denied");
+  }
+`;
+const denied = await inside("node", "--input-type=module", "-e", lowScope);
+assert.match(denied.stdout, /Low-scope resolution denied/);
+assert.deepEqual(await status(3), beforeDenied);
+assert.equal(await count(), 3);
 await release();
 assert.equal((await resolve(3, "retry")).job.status, "retry-approved");
+await compose("restart", "gateway");
+await ready();
+assert.equal((await status(3)).status, "retry-approved");
 const retried = await dispatch(3);
 assert.equal(retried.status, "completed");
 assert.notEqual(retried.job.jobId, starting.job.jobId);

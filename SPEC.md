@@ -67,8 +67,11 @@ Malformed session extensions block admission with an inspection error.
 Completed, active, abandoned and uncertain work
 blocks another start. Status reads remain available while a workflow is running.
 
-A retained `starting` record from a previous process generation is reported as
-`needs-inspection`, without automatic restart. The operator-only
+A retained `starting` record without a matching in-flight start is reported as
+`needs-inspection`, including after a process restart or a failed metadata
+write. Gateway errors are reported without their raw messages, which may
+contain credentials. Malformed workflow results and missing continuation
+tokens require inspection. The operator-only
 `agent-crew.resolve` Gateway method requires `operator.admin` and an inspection
 note; `retry` permits one new attempt, while `abandon` keeps the issue blocked.
 The next attempt retains the latest operator decision. This boundary assumes
