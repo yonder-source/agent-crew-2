@@ -1,7 +1,6 @@
 # WBS5 — Acceptance and reuse handoff
 
-Status: implementation and clean-checkout suite complete; final PR CI pending.
-Depends on WBS1–4.
+Status: acceptance complete; PR #7 awaits review and merge. Depends on WBS1–4.
 
 ## Settled scope
 
@@ -59,7 +58,8 @@ prepares that evidence and inventory.
   deployment assertions, lint CLI fixtures, type/config checks, dispatcher mock
   boundaries, pinned Gateway status/session checks across restart, and synthetic
   dispatcher duplicate/crash/retry/abandon behavior. See local `project-memory.md`
-  for the run record. The final PR CI run is pending.
+  for the run record.
+- PR #7 CI run #14 passed its `Gateway checks` job.
 - WBS4 GitHub ruleset application and live agent-authority checks remain
   deferred; no live server-side enforcement is claimed.
 
