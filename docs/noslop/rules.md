@@ -1,18 +1,18 @@
 # Coverage inventory
 
-WBS1–2 enable the tooling and focused restrictions below. WBS3–4 regressions
-and authority checks remain planned; executable configuration owns rule details.
+WBS1–3 enable the tooling, restrictions and regressions below. WBS4 authority
+checks remain planned; executable configuration owns rule details.
 
 | Area | Existing evidence or configuration | Remaining delivery |
 | --- | --- | --- |
 | Type safety | `tsconfig.json` enables strict mode and three additional flags; `eslint.config.mjs` enables recommended typed rules and unsafe-assertion rejection; `src/index.ts` guards unknown inputs | WBS1 delivered; extend alongside new source |
-| Async work | Typed preset rejects floating/misused Promises; dispatcher serializes admission and awaits state writes | WBS3: failure behavior |
+| Async work | Typed preset rejects floating/misused Promises; dispatcher serializes admission and awaits state writes | WBS3 exercises failed writes and uncertain results |
 | JavaScript and tools | `eslint.config.mjs` covers JS/TS module extensions and declarations; `scripts/check-lint.mjs` exercises actual CLI rejection and safe equivalents | WBS1 delivered; JS syntax/scope rules, TS typed rules |
 | Node APIs and imports | Native ESLint API/import restrictions, named CLI/VM exceptions and real lint fixtures | WBS2 delivered; indirect data-flow analysis is outside syntax rules |
 | Deployment | Native OpenClaw validation plus resolved Compose assertions and mutation fixtures in `scripts/check-deployment.mjs` | WBS2 delivered; no external deployment changes |
-| Inputs and public output | `scripts/check-dispatcher-boundaries.mjs` uses mocked Gateway responses and continuation canaries | WBS3: missing malformed-envelope, error and public-output cases |
-| Errors and secrets | `scripts/check-config.mjs` checks parsing and native config validity | WBS3: missing secret-canary and uncertain-effect cases |
-| Persistence and recovery | `scripts/session-roundtrip.mjs`, `scripts/check-dispatcher.mjs` exercise restart, duplicates, SIGKILL and operator decisions | WBS3: missing persistence-failure and low-privilege denial cases |
+| Inputs and public output | Mocked Gateway and Lobster envelopes, continuation canaries and public projection checks | Extend with future capabilities |
+| Errors and secrets | Config validation plus mocked Gateway errors and stored-error canaries | Extend with future capabilities |
+| Persistence and recovery | Mock write failures and lost responses; native synthetic restart, duplicates, SIGKILL and operator decisions | Extend with future capabilities |
 | CI and review | `.github/workflows/ci.yml` runs `scripts/check-all.sh`; Docker checks run lint, acceptance fixtures, type/config and boundary checks from locked tooling | WBS4: actual merge/authority settings |
 
 ## Scope and intentional fixture operations

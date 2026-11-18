@@ -7,10 +7,16 @@ import { parseConfig } from "./config.mjs";
 const NAMESPACE = "agent-crew-job";
 const AGENT_ID = "main";
 const JOB_STATUSES = ["starting", "active", "completed", "needs-inspection", "retry-approved", "abandoned"] as const;
+const WORKFLOW_STATUSES = ["ok", "needs_approval", "needs_input", "cancelled"] as const;
 type JobStatus = typeof JOB_STATUSES[number];
+type WorkflowStatus = typeof WORKFLOW_STATUSES[number];
 
 function isJobStatus(value: unknown): value is JobStatus {
   return JOB_STATUSES.some((status) => status === value);
+}
+
+function isWorkflowStatus(value: unknown): value is WorkflowStatus {
+  return WORKFLOW_STATUSES.some((status) => status === value);
 }
 
 type Issue = { repository: string; number: number };
@@ -21,7 +27,7 @@ type Job = Issue & {
   bootId: string;
   updatedAt: string;
   workflowRef?: string;
-  workflowStatus?: string;
+  workflowStatus?: WorkflowStatus;
   error?: string;
   decision?: string;
 };
@@ -36,8 +42,9 @@ function isJob(value: unknown): value is Job {
     typeof value.jobId === "string" && typeof value.sessionKey === "string" &&
     typeof value.bootId === "string" && typeof value.updatedAt === "string" &&
     isJobStatus(value.status) &&
-    ["workflowRef", "workflowStatus", "error", "decision"].every((key) =>
-      !(key in value) || typeof value[key] === "string");
+    ["workflowRef", "error", "decision"].every((key) =>
+      !(key in value) || typeof value[key] === "string") &&
+    (!("workflowStatus" in value) || isWorkflowStatus(value.workflowStatus));
 }
 
 // Explicit output boundary: continuation credentials stay in session metadata.
@@ -47,7 +54,7 @@ function publicJob(job: Job) {
     sessionKey: job.sessionKey, status: job.status, bootId: job.bootId,
     updatedAt: job.updatedAt,
     ...(job.workflowStatus !== undefined ? { workflowStatus: job.workflowStatus } : {}),
-    ...(job.error !== undefined ? { error: job.error } : {}),
+    ...(job.error !== undefined ? { error: "Workflow outcome requires inspection" } : {}),
     ...(job.decision !== undefined ? { decision: job.decision } : {}),
   };
 }
@@ -75,19 +82,24 @@ export default definePluginEntry({
     const config = parseConfig(api.pluginConfig);
     const bootId = randomUUID();
     let queue = Promise.resolve();
+    let startingJobId: string | undefined;
     api.session.state.registerSessionExtension({ namespace: NAMESPACE, description: "Issue admission and workflow status" });
     // Explicit operator credential: use the authenticated public API, not the
     // trusted-plugin-only in-process gateway.request capability.
-    const call = (method: string, params: unknown) => {
+    const call = async (method: string, params: unknown) => {
       const token = process.env.AGENT_CREW_GATEWAY_TOKEN;
       if (!token) throw new Error("AGENT_CREW_GATEWAY_TOKEN is required for dispatch");
-      return callGatewayFromCli(method, {
-        url: "ws://127.0.0.1:18789", token, timeout: "1210000", json: true,
-      }, params);
+      try {
+        return await callGatewayFromCli(method, {
+          url: "ws://127.0.0.1:18789", token, timeout: "1210000", json: true,
+        }, params);
+      } catch {
+        throw new Error("Gateway request failed; operator inspection required");
+      }
     };
     const describe = async (issue: Issue) => {
       const response = await call("sessions.describe", { key: sessionKey(issue) });
-      const session: unknown = response.session;
+      const session: unknown = isRecord(response) ? response.session : undefined;
       if (session === null) return null;
       if (!isRecord(session)) {
         throw new Error("Invalid Gateway session response; operator inspection required");
@@ -118,15 +130,16 @@ export default definePluginEntry({
 
     const readJob = async (issue: Issue, session = describe(issue)): Promise<Job | undefined> => {
       const extensions = await session;
-      const value = extensions?.find((item) => item.pluginId === "agent-crew" && item.namespace === NAMESPACE)?.value;
-      if (value === undefined) return undefined;
-      if (!isJob(value) || value.repository !== issue.repository || value.number !== issue.number ||
+      const matches = extensions?.filter((item) => item.pluginId === "agent-crew" && item.namespace === NAMESPACE) ?? [];
+      if (matches.length === 0) return undefined;
+      const value = matches[0]?.value;
+      if (matches.length !== 1 || !isJob(value) || value.repository !== issue.repository || value.number !== issue.number ||
           value.sessionKey !== sessionKey(issue)) {
         throw new Error("Invalid issue admission metadata; operator inspection required");
       }
       const job = value;
       // Read-only normalization avoids a status request racing an operator reset.
-      return job.status === "starting" && job.bootId !== bootId
+      return job.status === "starting" && (job.bootId !== bootId || job.jobId !== startingJobId)
         ? { ...job, status: "needs-inspection" as const } : job;
     };
 
@@ -174,43 +187,51 @@ export default definePluginEntry({
           if (existing && existing.status !== "retry-approved") return existing;
           if ((await session) === null) await call("sessions.create", { key: sessionKey(issue) });
           const job = { ...baseJob(issue), ...(existing?.decision ? { decision: existing.decision } : {}) };
-          await writeJob(issue, job);
+          startingJobId = job.jobId;
           try {
-            const response = await call("tools.invoke", {
-              name: "lobster",
-              args: {
-                action: "run",
-                pipeline: "workflows/synthetic-issue.lobster",
-                cwd: ".",
-                timeoutMs: 1200000,
-              },
-              sessionKey: job.sessionKey,
-            });
-            const output = response.output;
-            const workflow = isRecord(output) && isRecord(output.details) ? output.details : undefined;
-            if (response.ok !== true || workflow?.ok !== true ||
-                !["ok", "needs_approval", "needs_input", "cancelled"].includes(String(workflow.status))) {
-              throw new Error("Lobster did not return a recognized successful response; inspect the Gateway workflow logs");
+            await writeJob(issue, job);
+            try {
+              const response = await call("tools.invoke", {
+                name: "lobster",
+                args: {
+                  action: "run",
+                  pipeline: "workflows/synthetic-issue.lobster",
+                  cwd: ".",
+                  timeoutMs: 1200000,
+                },
+                sessionKey: job.sessionKey,
+              });
+              const output: unknown = isRecord(response) ? response.output : undefined;
+              const workflow = isRecord(output) && isRecord(output.details) ? output.details : undefined;
+              const workflowStatus = workflow?.status;
+              const continuation = workflowStatus === "needs_approval" ? workflow?.requiresApproval : workflow?.requiresInput;
+              if (!isRecord(response) || response.ok !== true || workflow?.ok !== true ||
+                  !isWorkflowStatus(workflowStatus) ||
+                  ((workflowStatus === "needs_approval" || workflowStatus === "needs_input") &&
+                    (!isRecord(continuation) || typeof continuation.resumeToken !== "string" || !continuation.resumeToken))) {
+                throw new Error("Lobster did not return a recognized successful response; inspect the Gateway workflow logs");
+              }
+              const completed: Job = {
+                ...job,
+                status: workflowStatus === "ok" ? "completed" : workflowStatus === "cancelled" ? "needs-inspection" : "active",
+                workflowStatus,
+                ...(isRecord(continuation) && typeof continuation.resumeToken === "string" ? { workflowRef: continuation.resumeToken } : {}),
+                updatedAt: new Date().toISOString(),
+              };
+              await writeJob(issue, completed);
+              return completed;
+            } catch {
+              const uncertain: Job = {
+                ...job,
+                status: "needs-inspection",
+                error: "Workflow result uncertain; inspect Gateway workflow logs",
+                updatedAt: new Date().toISOString(),
+              };
+              await writeJob(issue, uncertain);
+              return uncertain;
             }
-            const continuation = workflow.requiresApproval ?? workflow.requiresInput;
-            const completed: Job = {
-              ...job,
-              status: workflow.status === "ok" ? "completed" : workflow.status === "cancelled" ? "needs-inspection" : "active",
-              workflowStatus: String(workflow.status),
-              ...(isRecord(continuation) && typeof continuation.resumeToken === "string" ? { workflowRef: continuation.resumeToken } : {}),
-              updatedAt: new Date().toISOString(),
-            };
-            await writeJob(issue, completed);
-            return completed;
-          } catch (error) {
-            const uncertain: Job = {
-              ...job,
-              status: "needs-inspection",
-              error: error instanceof Error ? error.message : "workflow invocation failed",
-              updatedAt: new Date().toISOString(),
-            };
-            await writeJob(issue, uncertain);
-            return uncertain;
+          } finally {
+            startingJobId = undefined;
           }
         });
         const job = publicJob(result);

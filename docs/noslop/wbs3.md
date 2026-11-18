@@ -1,6 +1,6 @@
 # WBS3 — Product regression gaps
 
-Status: planned. Depends on WBS0; coordinate code fixes with WBS1–2.
+Status: implemented and verified; awaiting review. Based on WBS0–2.
 
 ## Deliver
 
@@ -38,3 +38,39 @@ in their own product packages.
 
 Canary and failure-injection techniques may transfer to other repos. Session
 schema, continuation projection and operator resolution cases belong here.
+
+## Evidence
+
+Mock Gateway cases exercise malformed responses, public output and error
+canaries, failed metadata writes and lost responses. They assert persisted
+state, inspection behavior and invocation counts. Native synthetic Gateway
+checks cover low-scope resolution denial, duplicate suppression, SIGKILL,
+restart, retry and abandon, including decision persistence across restart.
+Guard-removal checks cover the new boundaries and native scope and retry
+persistence. Mock guard-removal checks ran against the dispatcher compiled by
+the final shared Docker suite. All 12 mock mutations made the boundary script
+fail with an assertion; the Gateway and Lobster `ok` guards were removed
+individually. Results are recorded in
+`/tmp/noslop-wbs3-mutation-current.log`. The earlier
+`/tmp/noslop-wbs3-mutate.py` used an outdated build and is not the evidence for
+this run. Native disposable Gateway mutations also
+confirmed that removing the `agent-crew.resolve` scope guard admits
+`operator.read`, and removing retry decision persistence loses approval across
+restart.
+
+| Removed guard | Regression that failed |
+| --- | --- |
+| Gateway and stored error redaction | Gateway/stored error canary assertions |
+| Stored workflow-status membership validation | Invalid stored `workflowStatus` rejection |
+| Duplicate extension validation | Duplicate session metadata rejection |
+| Workflow envelope validation | Malformed Lobster envelope yields `needs-inspection` |
+| Gateway `response.ok` validation | Otherwise valid response with Gateway `ok: false` yields `needs-inspection` |
+| Lobster `workflow.ok` validation | Otherwise valid workflow with Lobster `ok: false` yields `needs-inspection` |
+| Continuation validation | Missing or malformed continuation yields `needs-inspection` |
+| Admission persistence before invocation | Pre-invocation persistence failure keeps invocation count at zero |
+| Inactive-start inspection and uncertain-state persistence | Ambiguous start/result persistence stays blocked and is not invoked again |
+| Public job projection | Continuation/error canaries stay out of public results |
+| Native `operator.admin` scope | Low-scope resolution reaches the handler after the scope guard is removed |
+| Native retry decision persistence | Retry approval is lost across restart after persistence is removed |
+
+These results do not establish live GitHub or Slack acceptance.
