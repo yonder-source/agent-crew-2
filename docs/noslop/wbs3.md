@@ -1,6 +1,6 @@
 # WBS3 — Product regression gaps
 
-Status: implemented and verified; awaiting review. Based on WBS0–2.
+Status: complete; PR #5 merged. Based on WBS0–2.
 
 ## Deliver
 

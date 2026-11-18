@@ -50,3 +50,14 @@ ruleset and agent-authority acceptance as deferred; do not claim it is active.
 The user reviews this completed implementation before extracting a general
 Node.js/TypeScript/Docker specification or shared skill set. This package
 prepares that evidence and inventory.
+
+## Reuse inventory
+
+| Candidate | Classification | Concrete assets | Dependencies or replacements | Evidence and limits |
+| --- | --- | --- | --- | --- |
+| Source/check coverage inventory | Configurable by repository | `docs/noslop/rules.md`, `docs/noslop/wbs0.md` | Replace source paths, risk areas and native check references for each repository. | Static inventory rechecked against source and checks; no runtime guarantee. |
+| Typed lint, compiler and reproducible Docker check stage | Configurable by repository | `eslint.config.mjs`, `tsconfig.json`, `Dockerfile`, `package-lock.json`, `scripts/check-lint.mjs`, `scripts/check-all.sh`, `.github/workflows/ci.yml` | Node.js/TypeScript versions, SDK declarations, linted source inventory, image digest and CI runner requirements vary by repo. | WBS1 Docker suite and PR CI evidence; rules/presets are reusable, configuration and versions are not universal. |
+| Native ESLint restrictions and resolved Compose assertions | Configurable by repository | `eslint.config.mjs`, `scripts/check-lint.mjs`, `scripts/check-deployment.mjs`, `docs/noslop/wbs2.md` | Select restrictions from demonstrated repository risks; replace Compose assertions and narrow path/operation exceptions. | Accepted/rejected lint fixtures and deployment mutation fixtures in the shared suite; no live deployment acceptance. |
+| Canary, failure-injection and guard-removal methods | Configurable by repository | `scripts/check-dispatcher-boundaries.mjs`, `scripts/check-dispatcher.mjs`, `docs/noslop/wbs3.md` | The test techniques transfer; adapt injected boundaries, secret canaries, expected state transitions and mutation targets to each system. | Mock boundary and native synthetic Gateway checks, including guard-removal results; no live GitHub/Slack acceptance. |
+| Gateway session, Lobster continuation and operator-resolution behavior | Agent Crew-specific | `src/index.ts`, `scripts/session-roundtrip.mjs`, `scripts/check-dispatcher.mjs`, `docs/noslop/wbs3.md` | Requires OpenClaw Gateway session metadata, Lobster and Agent Crew job/status contracts; another stack needs replacement. | Pinned local Gateway synthetic integration and restart/failure checks. |
+| Solo-maintainer merge and change-authority proposal | Configurable by repository | `SPEC.md`, this WBS4 operating contract, `docs/noslop/wbs4.md` | Requires adapting actor roles, branch names, GitHub plan/capabilities and credential model. | Isolated bare-repository and documented VS Code push behavior only. GitHub rulesets and agent permissions remain deferred and unverified. |
