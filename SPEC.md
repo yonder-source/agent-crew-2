@@ -193,6 +193,16 @@ owns enabled rules and narrow exceptions. Behavioral tests establish validation,
 authorization and uncertain-effect handling. Confirm actual GitHub protection
 capabilities before introducing custom approval infrastructure.
 
+WBS4 uses the solo-maintainer model: the owner reviews quality-rule, workflow
+and test changes and merges PRs. Protect `main` by requiring PRs and passing
+`check-all`, while blocking direct updates, force pushes and deletion. Do not
+require an approval count or push allowlist. Coding agents may publish feature
+branches and PRs but receive no ruleset administration or bypass permission.
+The owner retains repository-admin authority and can change or bypass these
+controls. Verify live enforcement before describing it as active. Test Git and
+supported VS Code push defaults first; add a local `pre-push` guard only for an
+observed gap.
+
 WBS2 uses native ESLint restrictions for eval/Function/string timers, process
 and VM imports, the reviewed public SDK entry points and direct production
 imports from scripts/tests/historical material. Static ESM imports are required:

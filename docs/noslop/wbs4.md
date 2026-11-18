@@ -1,6 +1,7 @@
 # WBS4 — Merge and change authority
 
-Status: planned. Depends on WBS1 and inspection of actual repository settings.
+Status: planned. Design settled by grilling; verify actual repository settings
+and enforcement during implementation.
 
 ## Deliver
 
@@ -8,17 +9,18 @@ Status: planned. Depends on WBS1 and inspection of actual repository settings.
    checks and the credentials available to coding agents. Inspect the local
    Git branch/upstream and push configuration used by the supported VS Code and
    CLI workflows as well.
-2. Define who can change quality configuration, workflows and tests, approve
-   those changes, bypass protection and merge. Match controls to the actual
-   ownership model, including a solo-maintainer workflow if applicable.
+2. Use the solo-maintainer model: the owner reviews quality configuration,
+   workflow and test changes and merges PRs. Do not require an independent
+   approval count that the repository cannot provide.
 3. Prefer GitHub native review requirements, CODEOWNERS and least-privilege
    agent credentials. Prepare reviewable proposed settings before applying
    externally visible permission changes.
-4. Protect `main` with a server-side rule that requires pull requests and
-   blocks direct updates, force pushes and deletion. Keep routine user and agent
-   credentials out of the bypass list where the repository plan permits it.
-   Confirm the applicable GitHub plan and the actual ruleset behavior before
-   treating this as enforced.
+4. Configure server-side protection for `main`: require pull requests and
+   passing `check-all`; block direct updates, force pushes and deletion. Do not
+   require an approval count or configure a push allowlist. Give coding agents
+   feature-branch/PR permissions only; do not grant ruleset administration or
+   bypass. The owner retains admin authority and can change or bypass controls.
+   Confirm plan support and actual enforcement before claiming it is active.
 5. Assess Git's native push safeguards for the local workflow, including
    `push.default=simple` and `branch.autoSetupMerge=simple`. Verify how creating
    a feature branch from `origin/main` affects its upstream, and make first
@@ -31,8 +33,9 @@ Status: planned. Depends on WBS1 and inspection of actual repository settings.
    supported by the project and report any bypass paths.
 7. Verify whether candidate changes can weaken required checks while still
    satisfying merge requirements. Document remaining capability gaps.
-8. Propose a repository-managed `pre-push` guard only if Git defaults and
-   server-side rules leave an observed gap. If selected, constrain remote ref
+8. First verify Git defaults and supported VS Code behavior. Propose a
+   repository-managed `pre-push` guard only if these and server-side rules leave
+   an observed gap. If selected, constrain remote ref
    updates to `main`, document installation and the effects of skipping local
    hooks, and test default, explicit-ref and multi-ref pushes. A local hook is
    an early warning; it cannot replace server-side protection.
@@ -42,9 +45,9 @@ Status: planned. Depends on WBS1 and inspection of actual repository settings.
 ## Acceptance
 
 Use an isolated bare repository to test default and explicit push behavior,
-upstream mismatch, and any selected local hook. Use a disposable PR or suitable
-isolated repository to demonstrate server-side `main` protection, required
-checks/review behavior and agent authority limits. Record actual settings and
-all tested bypass paths. If external settings cannot be exercised, record them
-as pending rather than claiming enforcement from files. Keep findings and the
-chosen operating contract in SPEC.
+upstream mismatch, and any selected local hook. Inspect the live repository
+settings and demonstrate server-side `main` protection, required checks and
+agent authority limits where permissions allow. Record actual settings and
+tested bypass paths. If a check cannot be exercised, record it as pending
+rather than claiming enforcement from files. Keep findings and the chosen
+operating contract in SPEC.
