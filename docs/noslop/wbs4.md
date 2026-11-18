@@ -15,13 +15,14 @@ and enforcement during implementation.
 3. Prefer GitHub native review requirements, CODEOWNERS and least-privilege
    agent credentials. Prepare reviewable proposed settings before applying
    externally visible permission changes.
-4. Configure server-side protection for `main`: require pull requests and
-   passing the `Gateway checks` status; block force pushes and deletion. This
-   GitHub Actions job runs `./scripts/check-all.sh`. Enable `Restrict updates`
-   for `main`, with Repository administrators as the only bypass actor and
-   `For pull requests only` as bypass mode. Do not require an approval count or
-   give coding agents ruleset administration or bypass. The owner retains
-   admin authority and can change the ruleset.
+4. Configure two server-side rulesets for `main`. The CI/PR ruleset requires
+   pull requests and the `Gateway checks` status from GitHub Actions (this job
+   runs `./scripts/check-all.sh`), and blocks force pushes and deletion. The
+   separate update restriction ruleset enables `Restrict updates` and gives
+   Repository administrators the only bypass, with `For pull requests only`.
+   This separation prevents that bypass from bypassing the required CI rules.
+   Do not require an approval count or give coding agents ruleset administration
+   or bypass. The owner retains admin authority and can change the rulesets.
    Confirm plan support and actual enforcement before claiming it is active.
 5. Assess Git's native push safeguards for the local workflow, including
    `push.default=simple` and `branch.autoSetupMerge=simple`. Verify how creating
@@ -77,8 +78,11 @@ operating contract in SPEC.
   enforce the boundary.
 - The user accepted `Restrict updates` for `main`, with Repository
   administrators as the only bypass actor and `For pull requests only` as
-  bypass mode. This prevents Write-level coding agents from merging or directly
-  updating `main`; the owner keeps authority to change the ruleset. The required
-  CI status does not protect its own definition: a PR could keep the `Gateway
-  checks` job name while weakening its steps, so the owner reviews workflow
-  changes before merging.
+  bypass mode. Keep this in a separate ruleset from required PR, CI, force-push
+  and deletion rules so the admin bypass does not bypass CI. Bind `Gateway
+  checks` to GitHub Actions as the expected source. This prevents Write-level
+  coding agents from merging or directly updating `main`; the owner keeps
+  authority to change the rulesets. A PR could keep the `Gateway checks` job
+  name while weakening its steps, so the owner reviews workflow changes before
+  merging. These settings are proposed only; live GitHub configuration remains
+  unchanged and unverified.

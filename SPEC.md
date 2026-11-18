@@ -194,23 +194,25 @@ authorization and uncertain-effect handling. Confirm actual GitHub protection
 capabilities before introducing custom approval infrastructure.
 
 WBS4 uses the solo-maintainer model: the owner reviews quality-rule, workflow
-and test changes and merges PRs. Protect `main` by requiring PRs and passing
-the `Gateway checks` status (which runs `scripts/check-all.sh`), while blocking
-force pushes and deletion. Enable `Restrict updates` for `main` and allow only
-Repository administrators to bypass that rule for pull requests. This keeps
+and test changes and merges PRs. Protect `main` with separate rulesets: one
+requires PRs and the `Gateway checks` status from GitHub Actions (running
+`scripts/check-all.sh`), and blocks force pushes and deletion; the other enables
+`Restrict updates` and allows only Repository administrators to bypass for PRs.
+Separate rulesets ensure the update bypass cannot bypass required CI. This keeps
 Write-level coding agents from merging PRs or updating `main` directly. Do not
 require an approval count or give agents a bypass. Repository administrators
-retain authority to change the ruleset. Verify live enforcement before
+retain authority to change the rulesets. Verify live enforcement before
 describing it as active. Test Git and supported VS Code push defaults first;
 add a local `pre-push` guard only for an observed gap.
 
 WBS4 live inspection found no rulesets and `main.protected=false`; required
 status checks are disabled. The GitHub Actions status context is `Gateway
-checks`, whose job executes `scripts/check-all.sh`. The settled ruleset includes
-`Restrict updates` with Repository administrators as the only bypass actor and
-`For pull requests only` as its bypass mode. A PR can weaken the workflow while
-retaining the required job name; the owner reviews workflow changes before
-merging under the solo-maintainer model.
+checks`, whose job executes `scripts/check-all.sh`. The proposed configuration
+uses separate CI/PR and update restriction rulesets, binds the required check to
+GitHub Actions as its expected source, and grants Repository administrators
+PR-only bypass only on the update restriction ruleset. A PR can weaken the
+workflow while retaining the required job name; the owner reviews workflow
+changes before merging under the solo-maintainer model.
 
 WBS2 uses native ESLint restrictions for eval/Function/string timers, process
 and VM imports, the reviewed public SDK entry points and direct production
