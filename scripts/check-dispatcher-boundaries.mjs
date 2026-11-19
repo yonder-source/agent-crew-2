@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { assignedIssueFromSession, trustedSessionKey } from "../dist/assignment.js";
 import vm from "node:vm";
+import { IssueDiscovery } from "../dist/discovery.js";
 
 const source = readFileSync(process.env.DISPATCHER_SOURCE ?? "dist/index.js", "utf8")
   .replace(/^import .*;\n/gm, "")
@@ -10,6 +11,7 @@ const source = readFileSync(process.env.DISPATCHER_SOURCE ?? "dist/index.js", "u
 let session = null;
 let calls = [];
 let updateFailure = new Error("GitHub issue update outcome is uncertain");
+let updateGate = Promise.resolve();
 let holdWorkflow = false;
 let workflowStartedResolve;
 const workflowStarted = new Promise((resolve) => { workflowStartedResolve = resolve; });
@@ -26,7 +28,7 @@ const context = vm.createContext({
     constructor(code, message) { super(message); this.code = code; }
   },
   OctokitGitHubIssueProvider: class {
-    async updateIssueBody() { throw updateFailure; }
+    async updateIssueBody() { await updateGate; if (updateFailure) throw updateFailure; return { body: "Changed" }; }
     async readIssue(repository, number) { return { repository, number, title: "Issue", body: "Body", state: "open", labels: [] }; }
   },
   IssueDiscovery: class {},
@@ -152,4 +154,62 @@ safe(await dispatch());
 assert.equal(calls.filter((method) => method === "sessions.describe").length, 2,
   "Dispatcher completion reloads the latest job metadata before patching workflow status");
 assert.ok(!calls.includes("sessions.create"));
+// Poll the actual discovery class through the registered dispatcher.
+const workflowCount = () => calls.filter(method => method === "tools.invoke").length;
+const startsBeforePoll = workflowCount();
+session = null;
+const discovery = new IssueDiscovery({
+  repository: params.repository,
+  listReadyIssues: async () => [{ repository: params.repository, number: params.issueNumber }],
+  dispatch: async () => dispatch(),
+  onComplete() {},
+  onFailure(error) { throw error; },
+});
+await discovery.poll();
+await discovery.poll();
+assert.equal(workflowCount(), startsBeforePoll + 1, "Repeated discovery must start exactly one workflow");
+
+// A live PATCH is not an interrupted operation and cannot be resolved.
+const liveJob = session.pluginExtensions[0].value;
+liveJob.status = "active";
+delete liveJob.issueUpdate;
+const liveUpdateTool = issueToolFactory.create({sessionKey: liveJob.sessionKey, assertInvocationCurrent() {}})
+  .find(tool => tool.name === "agent_crew_issue_update");
+let finishUpdate;
+updateGate = new Promise(resolve => { finishUpdate = resolve; });
+updateFailure = undefined;
+const liveUpdate = liveUpdateTool.execute("test", {body: "Changed"});
+for (let attempt = 0; attempt < 100 && !session.pluginExtensions[0].value.issueUpdate; attempt++) {
+  await new Promise(resolve => setTimeout(resolve, 1));
+}
+assert.equal((await status()).details.job.issueUpdate.status, "writing");
+for (const decision of ["confirm", "retry", "abandon"]) {
+  await methods.get("agent-crew.resolve").handler({
+    params: {...params, target:"issue-update", decision, note:"Request still running"},
+    respond: ok => assert.equal(ok, false, "Operator must not resolve a live PATCH"),
+  });
+}
+finishUpdate();
+await liveUpdate;
+assert.equal(session.pluginExtensions[0].value.issueUpdate, undefined);
+
+// A retained writing marker without an in-process operation is interrupted.
+session.pluginExtensions[0].value.issueUpdate = {
+  status:"writing", operationId:"prior-process", bodyHash:"fixture-hash", updatedAt:new Date().toISOString(),
+};
+assert.equal((await status()).details.job.issueUpdate.status, "needs-inspection");
+await assert.rejects(liveUpdateTool.execute("test", {body:"Changed"}), /inspection/);
+
+// Workflow-only retry must retain the separate issue write inspection boundary.
+for (const updateStatus of ["needs-inspection", "abandoned"]) {
+  session.pluginExtensions[0].value.status = "needs-inspection";
+  session.pluginExtensions[0].value.issueUpdate.status = updateStatus;
+  await methods.get("agent-crew.resolve").handler({
+    params: {...params, decision:"retry", note:"Workflow only"},
+    respond: ok => assert.equal(ok, true),
+  });
+  await dispatch();
+  assert.equal(session.pluginExtensions[0].value.issueUpdate.status, updateStatus);
+  await assert.rejects(liveUpdateTool.execute("test", {body:"Changed"}), /inspection/);
+}
 console.log("Dispatcher boundary checks passed (mock Gateway; issue update inspection and operator decisions covered; no runtime qualification)");

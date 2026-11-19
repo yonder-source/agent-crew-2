@@ -70,6 +70,7 @@ export default definePluginEntry({
     let queue = Promise.resolve();
     let issueUpdateQueue = Promise.resolve();
     let metadataQueue = Promise.resolve();
+    const activeIssueUpdates = new Set<string>();
     api.session.state.registerSessionExtension({ namespace: NAMESPACE, description: "Issue admission and workflow status" });
     // Explicit operator credential: use the authenticated public API, not the
     // trusted-plugin-only in-process gateway.request capability.
@@ -147,7 +148,7 @@ export default definePluginEntry({
       return {
         ...job,
         ...(job.status === "starting" && job.bootId !== bootId ? { status: "needs-inspection" as const } : {}),
-        ...(job.issueUpdate?.status === "writing"
+        ...(job.issueUpdate?.status === "writing" && !activeIssueUpdates.has(job.issueUpdate.operationId)
           ? { issueUpdate: { ...job.issueUpdate, status: "needs-inspection" as const } }
           : {}),
       };
@@ -167,8 +168,14 @@ export default definePluginEntry({
       const existing = await readJob(issue, session);
       if (existing && LOCKED.has(existing.status)) return existing;
       if ((await session) === null) await call("sessions.create", { key: sessionKey(issue) });
-      const job = { ...baseJob(issue), ...(existing?.decision ? { decision: existing.decision } : {}) };
-      await writeJob(issue, job);
+      const job = existing
+        ? await patchJob(issue, (current) => ({
+          ...baseJob(issue),
+          ...(current.decision ? { decision: current.decision } : {}),
+          ...(current.issueUpdate ? { issueUpdate: current.issueUpdate } : {}),
+        }))
+        : baseJob(issue);
+      if (!existing) await writeJob(issue, job);
       try {
         const response = await call("tools.invoke", {
           name: "lobster",
@@ -262,8 +269,7 @@ export default definePluginEntry({
                 },
               };
             })
-            : await serialize(async () => {
-            const existing = await readJob(issue);
+            : await serialize(() => patchJob(issue, (existing) => {
             if (values.target !== undefined && values.target !== "workflow") throw new Error("target must be workflow or issue-update");
             if ((values.decision !== "retry" && values.decision !== "abandon") || !existing || existing.status !== "needs-inspection") {
               throw new Error("workflow is not awaiting a valid operator decision");
@@ -276,9 +282,8 @@ export default definePluginEntry({
               decision: `${decision}: ${note}`,
               updatedAt: new Date().toISOString(),
             };
-            await writeJob(issue, next);
             return next;
-          });
+          }));
           respond(true, { job: publicJob(updated) });
         } catch (error) {
           respond(false, undefined, {
@@ -371,45 +376,54 @@ export default definePluginEntry({
                   bodyHash: createHash("sha256").update(params.body).digest("hex"),
                   updatedAt: new Date().toISOString(),
                 };
-                await patchJob(issue, (current) => {
-                  if (current.issueUpdate?.status === "needs-inspection" || current.issueUpdate?.status === "writing" ||
-                      current.issueUpdate?.status === "abandoned") {
-                    throw new Error("An earlier issue body update needs operator inspection before another write.");
-                  }
-                  return { ...current, issueUpdate: pending };
-                });
+                activeIssueUpdates.add(pending.operationId);
                 try {
-                  const updated = await issueProvider.updateIssueBody(
-                    assignment.repository,
-                    assignment.number,
-                    params.body,
-                    assertCurrent,
-                  );
-                  assertCurrent();
                   await patchJob(issue, (current) => {
-                    if (current.issueUpdate?.operationId !== pending.operationId) {
-                      throw new Error("Issue update operation changed; operator inspection is required.");
+                    if (current.jobId !== assignment.jobId ||
+                        !(current.status === "active" || (current.status === "starting" && current.bootId === bootId))) {
+                      throw new Error("This session has no active Agent Crew issue assignment.");
                     }
-                    const { issueUpdate: _completedUpdate, ...currentWithoutUpdate } = current;
-                    return { ...currentWithoutUpdate, updatedAt: new Date().toISOString() };
+                    if (current.issueUpdate?.status === "needs-inspection" || current.issueUpdate?.status === "writing" ||
+                        current.issueUpdate?.status === "abandoned") {
+                      throw new Error("An earlier issue body update needs operator inspection before another write.");
+                    }
+                    return { ...current, issueUpdate: pending };
                   });
-                  return { status: "updated", issue: updated };
-                } catch (error) {
-                  const uncertain = !(error instanceof GitHubIssueError) ||
-                    (error instanceof GitHubIssueError && error.code === "GITHUB_WRITE_UNCERTAIN");
-                  if (uncertain) {
-                    await patchJob(issue, (current) => ({
-                      ...current,
-                      issueUpdate: { ...pending, status: "needs-inspection", updatedAt: new Date().toISOString() },
-                    }));
-                    throw new Error("Issue body update outcome is uncertain; operator inspection is required.");
+                  try {
+                    const updated = await issueProvider.updateIssueBody(
+                      assignment.repository,
+                      assignment.number,
+                      params.body,
+                      assertCurrent,
+                    );
+                    assertCurrent();
+                    await patchJob(issue, (current) => {
+                      if (current.issueUpdate?.operationId !== pending.operationId) {
+                        throw new Error("Issue update operation changed; operator inspection is required.");
+                      }
+                      const { issueUpdate: _completedUpdate, ...currentWithoutUpdate } = current;
+                      return { ...currentWithoutUpdate, updatedAt: new Date().toISOString() };
+                    });
+                    return { status: "updated", issue: updated };
+                  } catch (error) {
+                    const uncertain = !(error instanceof GitHubIssueError) ||
+                      (error instanceof GitHubIssueError && error.code === "GITHUB_WRITE_UNCERTAIN");
+                    if (uncertain) {
+                      await patchJob(issue, (current) => ({
+                        ...current,
+                        issueUpdate: { ...pending, status: "needs-inspection", updatedAt: new Date().toISOString() },
+                      }));
+                      throw new Error("Issue body update outcome is uncertain; operator inspection is required.");
+                    }
+                    await patchJob(issue, (current) => {
+                      if (current.issueUpdate?.operationId !== pending.operationId) return current;
+                      const { issueUpdate: _failedUpdate, ...currentWithoutUpdate } = current;
+                      return { ...currentWithoutUpdate, updatedAt: new Date().toISOString() };
+                    });
+                    throw error;
                   }
-                  await patchJob(issue, (current) => {
-                    if (current.issueUpdate?.operationId !== pending.operationId) return current;
-                    const { issueUpdate: _failedUpdate, ...currentWithoutUpdate } = current;
-                    return { ...currentWithoutUpdate, updatedAt: new Date().toISOString() };
-                  });
-                  throw error;
+                } finally {
+                  activeIssueUpdates.delete(pending.operationId);
                 }
               });
               const details = result;
