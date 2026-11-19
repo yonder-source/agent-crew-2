@@ -12,8 +12,7 @@
     "allowJs": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "types": [],
-    "baseUrl": "."
+    "types": []
   },
   "files": ["src/config.mjs"],
   "include": ["src/**/*.ts", "src/**/*.cts", "src/**/*.mts", "src/**/*.js", "src/**/*.cjs", "src/**/*.mjs"]
