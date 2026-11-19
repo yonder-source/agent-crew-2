@@ -29,19 +29,28 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAXIMUM_RESPONSE_BYTES = 1_000_000;
 const DEFAULT_MAXIMUM_PAGES = 100;
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asError(value: unknown): Error {
+  return value instanceof Error ? value : new Error("GitHub request failed.");
+}
+
 function parseRepository(repository: string): { owner: string; name: string; fullName: string; path: string } {
   const match = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/.exec(repository);
   if (!match) throw new GitHubIssueError("GITHUB_CONFIGURATION_INVALID", "GitHub repository must use owner/name format.");
-  const owner = match[1]!.toLowerCase();
-  const name = match[2]!.toLowerCase();
+  const owner = match[1]?.toLowerCase();
+  const name = match[2]?.toLowerCase();
+  if (!owner || !name) throw new GitHubIssueError("GITHUB_CONFIGURATION_INVALID", "GitHub repository must use owner/name format.");
   return { owner, name, fullName: `${owner}/${name}`, path: `/repos/${owner}/${name}` };
 }
 
 function parseIssue(value: unknown, repository: string): GitHubIssue & { isPullRequest: boolean } {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+  if (!isRecord(value)) {
     throw new GitHubIssueError("GITHUB_RESPONSE_INVALID", "GitHub returned an invalid issue.");
   }
-  const issue = value as Record<string, unknown>;
+  const issue = value;
   if (!Number.isSafeInteger(issue.number) || Number(issue.number) < 1 || typeof issue.title !== "string" ||
       issue.title.length > 256 || (issue.body !== null && typeof issue.body !== "string") ||
       (typeof issue.body === "string" && issue.body.length > 64_000) ||
@@ -49,16 +58,16 @@ function parseIssue(value: unknown, repository: string): GitHubIssue & { isPullR
     throw new GitHubIssueError("GITHUB_RESPONSE_INVALID", "GitHub returned an issue with an invalid shape.");
   }
   const labels = issue.labels.map((label: unknown) => {
-    if (!label || typeof label !== "object" || Array.isArray(label) || typeof (label as { name?: unknown }).name !== "string") {
+    if (!isRecord(label) || typeof label.name !== "string") {
       throw new GitHubIssueError("GITHUB_RESPONSE_INVALID", "GitHub returned invalid issue labels.");
     }
-    return (label as { name: string }).name;
+    return label.name;
   });
   return {
     repository,
     number: Number(issue.number),
     title: issue.title,
-    body: issue.body as string | null,
+    body: issue.body,
     state: issue.state,
     labels,
     isPullRequest: issue.pull_request !== undefined,
@@ -155,14 +164,16 @@ export class OctokitGitHubIssueProvider {
         for (const value of page.data) {
           const issue = parseIssue(value, target.fullName);
           if (!issue.isPullRequest && issue.state === "open" && issue.labels.includes(READY_LABEL)) {
-            const { isPullRequest: _pullRequest, ...publicIssue } = issue;
-            issues.push(publicIssue);
+            issues.push({
+              repository: issue.repository, number: issue.number, title: issue.title,
+              body: issue.body, state: issue.state, labels: issue.labels,
+            });
           }
         }
       }
       return issues;
     } catch (error) {
-      if (requestState.guardFailure !== undefined) throw requestState.guardFailure;
+      if (requestState.guardFailure !== undefined) throw asError(requestState.guardFailure);
       if (requestState.timedOut) {
         throw new GitHubIssueError("GITHUB_REQUEST_TIMEOUT", "GitHub issue request exceeded its time limit.");
       }
@@ -187,10 +198,12 @@ export class OctokitGitHubIssueProvider {
       if (issue.isPullRequest || issue.number !== number) {
         throw new GitHubIssueError("GITHUB_RESPONSE_INVALID", "GitHub returned a different resource than the assigned issue.");
       }
-      const { isPullRequest: _pullRequest, ...publicIssue } = issue;
-      return publicIssue;
+      return {
+        repository: issue.repository, number: issue.number, title: issue.title,
+        body: issue.body, state: issue.state, labels: issue.labels,
+      };
     } catch (error) {
-      if (requestState.guardFailure !== undefined) throw requestState.guardFailure;
+      if (requestState.guardFailure !== undefined) throw asError(requestState.guardFailure);
       if (requestState.timedOut) {
         throw new GitHubIssueError("GITHUB_REQUEST_TIMEOUT", "GitHub issue request exceeded its time limit.");
       }
@@ -231,14 +244,16 @@ export class OctokitGitHubIssueProvider {
       if (issue.isPullRequest || issue.number !== number || issue.body !== body) {
         throw new GitHubIssueError("GITHUB_WRITE_UNCERTAIN", "GitHub issue update needs operator inspection.");
       }
-      const { isPullRequest: _pullRequest, ...publicIssue } = issue;
-      return publicIssue;
+      return {
+        repository: issue.repository, number: issue.number, title: issue.title,
+        body: issue.body, state: issue.state, labels: issue.labels,
+      };
     } catch (error) {
-      if (requestState.guardFailure !== undefined) throw requestState.guardFailure;
+      if (requestState.guardFailure !== undefined) throw asError(requestState.guardFailure);
       if (requestState.timedOut) {
         throw new GitHubIssueError("GITHUB_WRITE_UNCERTAIN", "GitHub issue update outcome is uncertain; inspect the issue before retrying.");
       }
-      const status = error && typeof error === "object" ? (error as { status?: unknown }).status : undefined;
+      const status = isRecord(error) ? error.status : undefined;
       if (requestState.started && !(typeof status === "number" && status >= 400 && status < 500)) {
         throw new GitHubIssueError("GITHUB_WRITE_UNCERTAIN", "GitHub issue update outcome is uncertain; inspect the issue before retrying.");
       }
@@ -318,7 +333,7 @@ export class OctokitGitHubIssueProvider {
 
   private safeError(error: unknown, fallbackCode: string): GitHubIssueError {
     if (error instanceof GitHubIssueError) return error;
-    const status = error && typeof error === "object" ? (error as { status?: unknown }).status : undefined;
+    const status = isRecord(error) ? error.status : undefined;
     const code = typeof status === "number" && status >= 400 && status < 500
       ? "GITHUB_REQUEST_REJECTED"
       : fallbackCode;

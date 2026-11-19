@@ -10,17 +10,29 @@ import { GitHubIssueError, OctokitGitHubIssueProvider } from "./github-issues.js
 
 const NAMESPACE = "agent-crew-job";
 const AGENT_ID = "main";
+const JOB_STATUSES = ["starting", "active", "completed", "needs-inspection", "retry-approved", "abandoned"] as const;
+const WORKFLOW_STATUSES = ["ok", "needs_approval", "needs_input", "cancelled"] as const;
+type JobStatus = typeof JOB_STATUSES[number];
+type WorkflowStatus = typeof WORKFLOW_STATUSES[number];
 const LOCKED = new Set(["starting", "active", "completed", "needs-inspection", "abandoned"]);
+
+function isJobStatus(value: unknown): value is JobStatus {
+  return JOB_STATUSES.some((status) => status === value);
+}
+
+function isWorkflowStatus(value: unknown): value is WorkflowStatus {
+  return WORKFLOW_STATUSES.some((status) => status === value);
+}
 
 type Issue = { repository: string; number: number };
 type Job = Issue & {
   jobId: string;
   sessionKey: string;
-  status: "starting" | "active" | "completed" | "needs-inspection" | "retry-approved" | "abandoned";
+  status: JobStatus;
   bootId: string;
   updatedAt: string;
   workflowRef?: string;
-  workflowStatus?: string;
+  workflowStatus?: WorkflowStatus;
   error?: string;
   decision?: string;
   issueUpdate?: {
@@ -32,6 +44,29 @@ type Job = Issue & {
   };
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isJob(value: unknown): value is Job {
+  if (!isRecord(value) || typeof value.repository !== "string" ||
+      typeof value.number !== "number" || !Number.isSafeInteger(value.number) || value.number < 1 ||
+      typeof value.jobId !== "string" || typeof value.sessionKey !== "string" ||
+      typeof value.bootId !== "string" || typeof value.updatedAt !== "string" ||
+      !isJobStatus(value.status) ||
+      (value.workflowRef !== undefined && typeof value.workflowRef !== "string") ||
+      (value.workflowStatus !== undefined && !isWorkflowStatus(value.workflowStatus)) ||
+      (value.error !== undefined && typeof value.error !== "string") ||
+      (value.decision !== undefined && typeof value.decision !== "string")) return false;
+  if (value.issueUpdate === undefined) return true;
+  const update = value.issueUpdate;
+  return isRecord(update) &&
+    ["writing", "needs-inspection", "retry-approved", "confirmed", "abandoned"].includes(String(update.status)) &&
+    typeof update.operationId === "string" && typeof update.bodyHash === "string" &&
+    typeof update.updatedAt === "string" &&
+    (update.decision === undefined || typeof update.decision === "string");
+}
+
 // Explicit output boundary: continuation credentials stay in session metadata.
 function publicJob(job: Job) {
   return {
@@ -39,7 +74,7 @@ function publicJob(job: Job) {
     sessionKey: job.sessionKey, status: job.status, bootId: job.bootId,
     updatedAt: job.updatedAt,
     ...(job.workflowStatus !== undefined ? { workflowStatus: job.workflowStatus } : {}),
-    ...(job.error !== undefined ? { error: job.error } : {}),
+    ...(job.error !== undefined ? { error: "Workflow outcome requires inspection" } : {}),
     ...(job.decision !== undefined ? { decision: job.decision } : {}),
     ...(job.issueUpdate !== undefined ? { issueUpdate: job.issueUpdate } : {}),
   };
@@ -68,35 +103,42 @@ export default definePluginEntry({
     const config = parseConfig(api.pluginConfig);
     const bootId = randomUUID();
     let queue = Promise.resolve();
+    let startingJobId: string | undefined;
     let issueUpdateQueue = Promise.resolve();
     let metadataQueue = Promise.resolve();
     const activeIssueUpdates = new Set<string>();
     api.session.state.registerSessionExtension({ namespace: NAMESPACE, description: "Issue admission and workflow status" });
     // Explicit operator credential: use the authenticated public API, not the
     // trusted-plugin-only in-process gateway.request capability.
-    const call = (method: string, params: unknown) => {
+    const call = async (method: string, params: unknown) => {
       const token = process.env.AGENT_CREW_GATEWAY_TOKEN;
       if (!token) throw new Error("AGENT_CREW_GATEWAY_TOKEN is required for dispatch");
-      return callGatewayFromCli(method, {
-        url: "ws://127.0.0.1:18789", token, timeout: "1210000", json: true,
-      }, params);
+      try {
+        return await callGatewayFromCli(method, {
+          url: "ws://127.0.0.1:18789", token, timeout: "1210000", json: true,
+        }, params);
+      } catch {
+        throw new Error("Gateway request failed; operator inspection required");
+      }
     };
     const describe = async (issue: Issue) => {
-      const response = await call("sessions.describe", { key: sessionKey(issue) });
-      const session: unknown = response.session;
+      const response: unknown = await call("sessions.describe", { key: sessionKey(issue) });
+      const session = isRecord(response) ? response.session : undefined;
       if (session === null) return null;
-      if (typeof session !== "object" || Array.isArray(session)) {
+      if (!isRecord(session)) {
         throw new Error("Invalid Gateway session response; operator inspection required");
       }
-      const extensions = (session as { pluginExtensions?: unknown }).pluginExtensions;
+      const extensions = session.pluginExtensions;
       if (extensions === undefined) return [];
-      if (!Array.isArray(extensions) || extensions.some((item: unknown) =>
-        typeof item !== "object" || item === null || Array.isArray(item) ||
-        typeof (item as { pluginId?: unknown }).pluginId !== "string" ||
-        typeof (item as { namespace?: unknown }).namespace !== "string")) {
+      if (!Array.isArray(extensions)) {
         throw new Error("Invalid session extensions; operator inspection required");
       }
-      return extensions as Array<{ pluginId: string; namespace: string; value: unknown }>;
+      return extensions.map((item: unknown) => {
+        if (!isRecord(item) || typeof item.pluginId !== "string" || typeof item.namespace !== "string") {
+          throw new Error("Invalid session extensions; operator inspection required");
+        }
+        return { pluginId: item.pluginId, namespace: item.namespace, value: item.value };
+      });
     };
     const writeJob = async (issue: Issue, job: Job): Promise<void> => {
       await call("sessions.pluginPatch", {
@@ -130,10 +172,18 @@ export default definePluginEntry({
 
     const readJob = async (issue: Issue, session = describe(issue)): Promise<Job | undefined> => {
       const extensions = await session;
-      const value = extensions?.find((item) => item.pluginId === "agent-crew" && item.namespace === NAMESPACE)?.value;
-      if (value === undefined) return undefined;
-      const job = value as Job;
-      if (!job || job.repository !== issue.repository || job.number !== issue.number ||
+      const matches = extensions?.filter((item) => item.pluginId === "agent-crew" && item.namespace === NAMESPACE) ?? [];
+      if (matches.length === 0) return undefined;
+      const value = matches[0]?.value;
+      if (matches.length !== 1 || value === undefined) {
+        throw new Error("Invalid issue admission metadata; operator inspection required");
+      }
+      if (!isJob(value) || value.repository !== issue.repository || value.number !== issue.number ||
+          value.sessionKey !== sessionKey(issue)) {
+        throw new Error("Invalid issue admission metadata; operator inspection required");
+      }
+      const job = value;
+      if (job.repository !== issue.repository || job.number !== issue.number ||
           job.sessionKey !== sessionKey(issue) || typeof job.jobId !== "string" ||
           typeof job.bootId !== "string" || !(LOCKED.has(job.status) || job.status === "retry-approved")) {
         throw new Error("Invalid issue admission metadata; operator inspection required");
@@ -147,7 +197,8 @@ export default definePluginEntry({
       // Read-only normalization avoids a status request racing an operator reset.
       return {
         ...job,
-        ...(job.status === "starting" && job.bootId !== bootId ? { status: "needs-inspection" as const } : {}),
+        ...(job.status === "starting" && (job.bootId !== bootId || job.jobId !== startingJobId)
+          ? { status: "needs-inspection" as const } : {}),
         ...(job.issueUpdate?.status === "writing" && !activeIssueUpdates.has(job.issueUpdate.operationId)
           ? { issueUpdate: { ...job.issueUpdate, status: "needs-inspection" as const } }
           : {}),
@@ -175,9 +226,10 @@ export default definePluginEntry({
           ...(current.issueUpdate ? { issueUpdate: current.issueUpdate } : {}),
         }))
         : baseJob(issue);
+      startingJobId = job.jobId;
       if (!existing) await writeJob(issue, job);
       try {
-        const response = await call("tools.invoke", {
+        const response: unknown = await call("tools.invoke", {
           name: "lobster",
           args: {
             action: "run",
@@ -187,29 +239,37 @@ export default definePluginEntry({
           },
           sessionKey: job.sessionKey,
         });
-        const output = response.output as { details?: Record<string, unknown> } | undefined;
-        const workflow = output?.details;
-        if (response.ok !== true || workflow?.ok !== true ||
-            !["ok", "needs_approval", "needs_input", "cancelled"].includes(String(workflow.status))) {
+        const output = isRecord(response) && isRecord(response.output) ? response.output : undefined;
+        const workflow = output && isRecord(output.details) ? output.details : undefined;
+        const workflowStatus = workflow?.status;
+        const continuationValue = workflowStatus === "needs_approval"
+          ? workflow?.requiresApproval
+          : workflowStatus === "needs_input" ? workflow?.requiresInput : undefined;
+        const continuation = isRecord(continuationValue) ? continuationValue : undefined;
+        if (!isRecord(response) || response.ok !== true || workflow?.ok !== true ||
+            !isWorkflowStatus(workflowStatus) ||
+            ((workflowStatus === "needs_approval" || workflowStatus === "needs_input") &&
+              (typeof continuation?.resumeToken !== "string" || !continuation.resumeToken))) {
           throw new Error("Lobster did not return a recognized successful response; inspect the Gateway workflow logs");
         }
-        const continuation = (workflow.requiresApproval ?? workflow.requiresInput) as { resumeToken?: string } | null;
         const completed = await patchJob(issue, (current) => ({
           ...current,
-          status: workflow.status === "ok" ? "completed" : workflow.status === "cancelled" ? "needs-inspection" : "active",
-          workflowStatus: String(workflow.status),
+          status: workflowStatus === "ok" ? "completed" : workflowStatus === "cancelled" ? "needs-inspection" : "active",
+          workflowStatus,
           ...(typeof continuation?.resumeToken === "string" ? { workflowRef: continuation.resumeToken } : {}),
           updatedAt: new Date().toISOString(),
         }));
         return completed;
-      } catch (error) {
+      } catch {
         const uncertain = await patchJob(issue, (current) => ({
           ...current,
           status: "needs-inspection",
-          error: error instanceof Error ? error.message : "workflow invocation failed",
+          error: "Workflow outcome requires inspection",
           updatedAt: new Date().toISOString(),
         }));
         return uncertain;
+      } finally {
+        startingJobId = undefined;
       }
     });
 
@@ -401,8 +461,9 @@ export default definePluginEntry({
                       if (current.issueUpdate?.operationId !== pending.operationId) {
                         throw new Error("Issue update operation changed; operator inspection is required.");
                       }
-                      const { issueUpdate: _completedUpdate, ...currentWithoutUpdate } = current;
-                      return { ...currentWithoutUpdate, updatedAt: new Date().toISOString() };
+                      const completed: Job = { ...current, updatedAt: new Date().toISOString() };
+                      delete completed.issueUpdate;
+                      return completed;
                     });
                     return { status: "updated", issue: updated };
                   } catch (error) {
@@ -413,12 +474,13 @@ export default definePluginEntry({
                         ...current,
                         issueUpdate: { ...pending, status: "needs-inspection", updatedAt: new Date().toISOString() },
                       }));
-                      throw new Error("Issue body update outcome is uncertain; operator inspection is required.");
+                      throw new Error("Issue body update outcome is uncertain; operator inspection is required.", { cause: error });
                     }
                     await patchJob(issue, (current) => {
                       if (current.issueUpdate?.operationId !== pending.operationId) return current;
-                      const { issueUpdate: _failedUpdate, ...currentWithoutUpdate } = current;
-                      return { ...currentWithoutUpdate, updatedAt: new Date().toISOString() };
+                      const failed: Job = { ...current, updatedAt: new Date().toISOString() };
+                      delete failed.issueUpdate;
+                      return failed;
                     });
                     throw error;
                   }
@@ -440,9 +502,9 @@ export default definePluginEntry({
       description: "Read Agent Crew plugin environment",
       parameters: Type.Object({}, { additionalProperties: false }),
       outputSchema: Type.Object({ status: Type.String(), environment: Type.String() }, { additionalProperties: false }),
-      async execute() {
+      execute() {
         const details = { status: "ready", environment: config.environment };
-        return { content: [{ type: "text" as const, text: JSON.stringify(details) }], details };
+        return Promise.resolve({ content: [{ type: "text" as const, text: JSON.stringify(details) }], details });
       },
     });
   },
