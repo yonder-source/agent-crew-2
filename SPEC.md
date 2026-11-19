@@ -44,6 +44,20 @@ small OpenClaw integration; it does not implement this workflow.
   adjust after observing actual runs. A pause for human input ends the current
   Lobster call; the next resume is a separate call.
 
+## Repository connection UI
+
+[WBS5.5](docs/restart/wbs5.5.md), between draft PR publication and Slack
+integration, delivers a required single-repository connection screen accessible
+from OpenClaw. An authenticated operator can configure the GitHub repository
+and matching checkout without editing JSON, inspect credential availability,
+validate access and save the connection using the existing configuration store.
+Keep secret values out of UI responses. Configuration must survive restart;
+report any restart needed to apply changes. Prevent connection changes from
+redirecting active or uncertain work. Reuse supported OpenClaw UI/configuration
+facilities; qualify the pinned runtime's extension support before choosing the
+integration. WBS6 end-to-end acceptance begins with this screen. Multi-repository
+management and credential provisioning are outside this UI package.
+
 ## WBS2 dispatcher
 
 Use the public, authenticated Gateway API to create native issue sessions and
