@@ -1,7 +1,8 @@
 # WBS4 — Merge and change authority
 
-Status: planned. Design settled by grilling; verify actual repository settings
-and enforcement during implementation.
+Status: local specification and Git/VS Code push-workflow checks complete.
+GitHub ruleset application and live agent-authority verification are deferred
+by user decision; the proposed ruleset is not active.
 
 ## Deliver
 
@@ -76,13 +77,13 @@ operating contract in SPEC.
   when a branch has no upstream and sets the upstream when publishing. An
   explicit target remains possible; the server-side ruleset is necessary to
   enforce the boundary.
-- The user accepted `Restrict updates` for `main`, with Repository
-  administrators as the only bypass actor and `For pull requests only` as
-  bypass mode. Keep this in a separate ruleset from required PR, CI, force-push
-  and deletion rules so the admin bypass does not bypass CI. Bind `Gateway
-  checks` to GitHub Actions as the expected source. This prevents Write-level
-  coding agents from merging or directly updating `main`; the owner keeps
-  authority to change the rulesets. A PR could keep the `Gateway checks` job
-  name while weakening its steps, so the owner reviews workflow changes before
-  merging. These settings are proposed only; live GitHub configuration remains
-  unchanged and unverified.
+- The user accepted the proposed `Restrict updates` rule for `main`, with
+  Repository administrators as the only bypass actor and `For pull requests
+  only` as bypass mode. Keep this in a separate ruleset from required PR, CI,
+  force-push and deletion rules so the admin bypass does not bypass CI. Bind
+  `Gateway checks` to GitHub Actions as the expected source. When applied, this
+  design is intended to prevent Write-level coding agents from merging or
+  directly updating `main`; the owner keeps authority to change the rulesets. A
+  PR could keep the `Gateway checks` job name while weakening its steps, so the
+  owner reviews workflow changes before merging. These settings are proposed
+  only; live GitHub configuration remains unchanged and unverified.

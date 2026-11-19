@@ -198,8 +198,9 @@ and test changes and merges PRs. Protect `main` with separate rulesets: one
 requires PRs and the `Gateway checks` status from GitHub Actions (running
 `scripts/check-all.sh`), and blocks force pushes and deletion; the other enables
 `Restrict updates` and allows only Repository administrators to bypass for PRs.
-Separate rulesets ensure the update bypass cannot bypass required CI. This keeps
-Write-level coding agents from merging PRs or updating `main` directly. Do not
+Separate rulesets ensure the update bypass cannot bypass required CI. When
+applied, the proposed controls are intended to prevent Write-level coding agents
+from merging PRs or updating `main` directly. Do not
 require an approval count or give agents a bypass. Repository administrators
 retain authority to change the rulesets. Verify live enforcement before
 describing it as active. Test Git and supported VS Code push defaults first;
@@ -212,7 +213,9 @@ uses separate CI/PR and update restriction rulesets, binds the required check to
 GitHub Actions as its expected source, and grants Repository administrators
 PR-only bypass only on the update restriction ruleset. A PR can weaken the
 workflow while retaining the required job name; the owner reviews workflow
-changes before merging under the solo-maintainer model.
+changes before merging under the solo-maintainer model. The rulesets have not
+been applied or live-tested; server-side protection and agent-authority
+enforcement remain deferred.
 
 WBS2 uses native ESLint restrictions for eval/Function/string timers, process
 and VM imports, the reviewed public SDK entry points and direct production

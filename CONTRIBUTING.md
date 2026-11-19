@@ -21,16 +21,34 @@ open an issue first to agree on scope and acceptance.
 
 ## Local checks
 
-Run the repository's shared check entrypoint before opening a pull request:
+The shared check entrypoint needs Docker Compose and host Node.js. It builds a
+pinned checks image and installs development tools from `package-lock.json`
+inside Docker; do not install project dependencies on the host. Run it before
+opening a pull request:
 
 ```sh
 ./scripts/check-all.sh
 ```
 
-See the project README for setup details. Do not install project dependencies
-on the host unless the maintainers document that as an option. For
-documentation-only changes, review links, paths, and rendered Markdown. If a
-relevant check cannot be run, explain why in the pull request.
+See the [project README](README.md#commands) for Docker setup and focused check
+commands. If the disposable Gateway check reports that port `18789` is already
+in use, stop the process using that port and rerun the suite. If lint reports
+missing OpenClaw SDK declarations on the host, use the checks image rather than
+installing dependencies locally. Rebuild the checks image after changing the
+source-file inventory, as described in the README.
+
+For documentation-only changes, review links, paths and rendered Markdown. If
+a relevant check cannot be run, explain why in the pull request.
+
+### Narrow lint exceptions
+
+Add an exception beside the rule in `eslint.config.mjs` and scope it to the
+specific file and operation that needs it. Include a short reason. Add an
+accepted fixture for the intended use and a rejected fixture for a nearby
+disallowed use through the actual lint check; assert the expected rule ID for
+the rejected case. Do not disable a rule across a directory to accommodate one
+file. Upstream rules do not need a duplicate syntax-variant suite; custom
+checkers need focused passing and failing fixtures.
 
 ## Commit messages
 

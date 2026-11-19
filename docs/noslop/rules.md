@@ -1,7 +1,9 @@
 # Coverage inventory
 
-WBS1–3 enable the tooling, restrictions and regressions below. WBS4 authority
-checks remain planned; executable configuration owns rule details.
+WBS1–3 deliver the tooling, restrictions and regressions below. WBS4 local
+authority design and push-workflow checks are complete; GitHub ruleset
+application and live agent-authority verification are deferred. Executable
+configuration owns tool-rule details.
 
 | Area | Existing evidence or configuration | Remaining delivery |
 | --- | --- | --- |
@@ -13,7 +15,7 @@ checks remain planned; executable configuration owns rule details.
 | Inputs and public output | Mocked Gateway and Lobster envelopes, continuation canaries and public projection checks | Extend with future capabilities |
 | Errors and secrets | Config validation plus mocked Gateway errors and stored-error canaries | Extend with future capabilities |
 | Persistence and recovery | Mock write failures and lost responses; native synthetic restart, duplicates, SIGKILL and operator decisions | Extend with future capabilities |
-| CI and review | `.github/workflows/ci.yml` runs `scripts/check-all.sh`; Docker checks run lint, acceptance fixtures, type/config and boundary checks from locked tooling | WBS4: actual merge/authority settings |
+| CI and review | `.github/workflows/ci.yml` runs `scripts/check-all.sh`; Docker checks run lint, acceptance fixtures, type/config and boundary checks from locked tooling. WBS4 proposes separate PR/CI and update-restriction rulesets for `main`. | WBS4 live ruleset and agent-authority acceptance are deferred; no server-side enforcement is claimed. |
 
 ## Scope and intentional fixture operations
 

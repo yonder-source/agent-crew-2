@@ -8,8 +8,9 @@ completion and review of the actual results.
 
 ## Status and authority
 
-WBS0 inventory, WBS1 standard tooling and WBS2 focused restrictions are complete.
-WBS3 is implemented and verified, pending review; WBS4–5 are planned.
+WBS0–3 are complete, including the merged WBS3 delivery. WBS4 local design and
+push-workflow checks are complete; applying and live-testing its GitHub rulesets
+is deferred. WBS5 acceptance is complete; PR #7 is awaiting review and merge.
 
 [Root SPEC.md](../../SPEC.md) owns requirements and settled decisions. This
 folder describes delivery and acceptance. Executable tool configuration owns
@@ -23,9 +24,9 @@ enabled rules; the inventory links to it once implemented. Local
 | [WBS0](wbs0.md) | Baseline and existing coverage inventory | Complete |
 | [WBS1](wbs1.md) | Standard lint, compiler checks and shared CI entry | WBS0 |
 | [WBS2](wbs2.md) | Focused API, import and deployment restrictions | WBS1 |
-| [WBS3](wbs3.md) | Product boundary and failure regressions | WBS0–2; pending review |
-| [WBS4](wbs4.md) | Review, merge and agent change authority | WBS1; inspect actual GitHub settings |
-| [WBS5](wbs5.md) | Acceptance, operating guidance and reuse inventory | WBS1–4 |
+| [WBS3](wbs3.md) | Product boundary and failure regressions | Complete; PR #5 merged |
+| [WBS4](wbs4.md) | Review, merge and agent change authority | Local work complete; live ruleset acceptance deferred |
+| [WBS5](wbs5.md) | Acceptance, operating guidance and reuse inventory | Acceptance complete; PR #7 awaiting review/merge |
 
 Each package may span several PRs. Target **300–600 handwritten changed lines**
 per branch/PR, counting additions plus deletions, including tests and docs.
