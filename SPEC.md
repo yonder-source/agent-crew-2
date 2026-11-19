@@ -269,3 +269,24 @@ For every package, record test commands/results and reusable candidates in local
 project memory; move settled requirements into this specification. Distinguish
 mock, native synthetic and live integration evidence. Extend checks for future
 product capabilities alongside their implementation.
+
+### WBS3 review follow-up
+
+Keep issue body update inspection/abandonment state across workflow retries.
+A live body PATCH remains `writing`; only a retained marker without a live
+in-process operation is treated as interrupted. Operator issue-update decisions
+are rejected while that PATCH is still running. Exclude local GitHub secret
+files from Docker build context as well as Git tracking.
+
+Clear the issue-update marker after a confirmed success or a failure known to be
+safe to retry. Preserve it for uncertain outcomes, including timeouts and
+interrupted writes. Operator `confirm`, `retry` and `abandon` decisions apply
+only after the operation is no longer running, require an inspection note, and
+remain recorded without automatically resending or clearing the inspection
+boundary. Workflow-only retry preserves unresolved issue-update state.
+
+Regression coverage includes discovery polls through the registered dispatcher,
+workflow-only retry with unresolved body writes, rejection of operator
+decisions during a live PATCH, and issue-update marker persistence and
+resolution through a disposable Gateway restart. These checks use fixtures
+and synthetic metadata, not live GitHub writes.
