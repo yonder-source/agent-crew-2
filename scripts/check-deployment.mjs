@@ -23,8 +23,21 @@ function validate(model, settings, metadata = pkg) {
   assert.ok(gateway.ports.some((port) => port.target === 18789 && String(port.published) === "18789"),
     "Gateway must publish the expected port");
   assert.ok(gateway.volumes.some((volume) => volume.type === "volume"
-    && volume.source === "openclaw-data" && volume.target === "/home/node/.openclaw"),
+    && volume.target === "/home/node/.openclaw"),
   "Gateway state must use its named volume");
+  assert.ok(gateway.volumes.some((volume) => volume.type === "bind"
+    && volume.target === "/home/node/.openclaw/worktrees"), "Managed worktrees must use a host-backed bind");
+  assert.ok(gateway.volumes.some((volume) => volume.type === "bind"
+    && volume.target === "/home/node/.openclaw/worktree-projections"),
+  "Managed worktree projections must use a host-backed bind");
+  assert.ok(gateway.volumes.some((volume) => volume.type === "bind"
+    && volume.target === "/home/node/.openclaw/sandbox"),
+  "Sandbox skill workspaces must use a host-backed bind");
+  assert.ok(gateway.volumes.some((volume) => volume.target === "/workspaces/repositories"),
+    "Gateway must have a configured host repository source for managed worktrees");
+  assert.ok(gateway.volumes.some((volume) => volume.source === "/var/run/docker.sock"
+    && volume.target === "/var/run/docker.sock"), "Gateway Docker backend needs the host Docker socket");
+  assert.ok(gateway.group_add?.length, "Gateway must join the host Docker socket group");
   const source = model.services.checks.volumes.find((volume) => volume.target === "/lint-source");
   assert.ok(source?.read_only && source.type === "bind", "Lint source must be a read-only bind mount");
   assert.equal(gateway.environment.OPENCLAW_CONFIG_PATH, "/app/extensions/agent-crew/openclaw.json");
@@ -39,10 +52,28 @@ function validate(model, settings, metadata = pkg) {
   assert.deepEqual(Object.keys(settings.plugins.entries).sort(), ["agent-crew", "lobster"]);
   for (const plugin of Object.values(settings.plugins.entries)) assert.equal(plugin.enabled, true);
   assert.deepEqual(settings.tools, { alsoAllow: ["lobster"] }, "Intended tool settings changed");
+  assert.equal(settings.agents.defaults.sandbox.mode, "non-main",
+    "Coding sessions must be sandboxed while the controller's Lobster session remains unsandboxed");
+  assert.equal(settings.agents.defaults.sandbox.backend, "docker");
+  assert.equal(settings.agents.defaults.sandbox.scope, "session");
+  assert.equal(settings.agents.defaults.sandbox.workspaceAccess, "rw");
+  assert.equal(settings.agents.defaults.sandbox.docker.network, "none");
+  assert.equal(settings.agents.defaults.sandbox.docker.readOnlyRoot, true);
+  assert.deepEqual(settings.agents.defaults.sandbox.docker.capDrop, ["ALL"]);
+  assert.equal(settings.agents.ownership, "explicit");
+  assert.ok(settings.agents.entries.main);
+  assert.deepEqual(settings.agents.entries.coding.tools.sandbox.tools.deny, ["github_publish"]);
+  assert.equal(settings.agents.entries.coding.workspace, "/workspaces/repositories");
+  assert.deepEqual(settings.agents.entries.coding.tools.alsoAllow,
+    ["agent_crew_issue_read", "agent_crew_issue_update"]);
+  assert.deepEqual(settings.agents.entries.coding.tools.deny, ["github_publish"]);
   const version = metadata.peerDependencies.openclaw;
   assert.equal(metadata.openclaw.compat.pluginApi, version, "Plugin API version mismatch");
   assert.equal(metadata.openclaw.build.openclawVersion, version, "Plugin build version mismatch");
   assert.ok(dockerfile.includes(`FROM ghcr.io/openclaw/openclaw:${version}@sha256:`), "Base SDK version mismatch");
+  assert.ok(dockerfile.includes("AS sandbox"), "Pinned sandbox image build target is missing");
+  assert.ok(dockerfile.includes("COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker"),
+    "Gateway Docker CLI is missing");
   assert.ok(dockerfile.includes(`@openclaw/lobster@${version}`), "Lobster version mismatch");
   assert.ok(dockerfile.includes(`npm pack openclaw@${version} `), "SDK declaration version mismatch");
   assert.equal(gateway.image, `agent-crew-openclaw:${version}`);
@@ -69,6 +100,7 @@ for (const [mutate, expected] of [
   [(settings) => { settings.plugins.load.paths.push("/tmp/unreviewed"); }, /paths/],
   [(settings) => { settings.plugins.entries.lobster.enabled = false; }, /equal/i],
   [(settings) => { settings.tools.alsoAllow.push("exec"); }, /tool settings/],
+  [(settings) => { settings.agents.defaults.sandbox.mode = "off"; }, /controller's Lobster session/],
 ]) {
   const settings = structuredClone(config);
   mutate(settings);

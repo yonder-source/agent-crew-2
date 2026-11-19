@@ -1,4 +1,10 @@
-FROM ghcr.io/openclaw/openclaw:2026.11.3@sha256:e73f689d663567f0fe3c5a85c54beb3e102dc21f0814bf375e9039ee2d2df51b AS base
+FROM docker:29.9.2-cli@sha256:5e6baf67325a79f64ed3bed6863954d5e05d0f3d4e57cbdb14809346814bbfdb AS docker-cli
+
+FROM ghcr.io/openclaw/openclaw:2026.11.3@sha256:e73f689d663567f0fe3c5a85c54beb3e102dc21f0814bf375e9039ee2d2df51b AS openclaw-upstream
+
+FROM openclaw-upstream AS sandbox
+
+FROM openclaw-upstream AS base
 USER root
 RUN npm install --prefix /opt/agent-crew-lobster --omit=dev --ignore-scripts @openclaw/lobster@2026.11.3
 USER node
@@ -23,10 +29,11 @@ RUN npm run build
 
 FROM build AS checks
 COPY --chown=node:node . ./
-CMD ["sh", "-c", "npm run lint && npm run check:lint && npm run typecheck && sh -n scripts/check-all.sh && node scripts/check-config.mjs && node scripts/check-dispatcher-boundaries.mjs && node scripts/check-wbs3.mjs"]
+CMD ["sh", "-c", "npm run lint && npm run check:lint && npm run typecheck && sh -n scripts/check-all.sh && node scripts/check-config.mjs && node scripts/check-dispatcher-boundaries.mjs && node scripts/check-coding-boundaries.mjs && node scripts/check-wbs3.mjs"]
 
 FROM base AS runtime
 USER root
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 RUN mkdir -p /app/extensions/agent-crew && chown node:node /app/extensions/agent-crew
 WORKDIR /app/extensions/agent-crew
 COPY --from=build --chown=node:node /app/extensions/agent-crew/dist ./dist

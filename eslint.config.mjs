@@ -66,7 +66,7 @@ export default defineConfig([
   })),
   {
     // The mock boundary harness runs compiled dispatcher code in a VM.
-    files: ["scripts/check-dispatcher-boundaries.mjs"],
+    files: ["scripts/check-dispatcher-boundaries.mjs", "scripts/check-coding-boundaries.mjs"],
     rules: {
       "no-restricted-imports": restrictImports([
         ...processLoaders, "child_process", "node:child_process",

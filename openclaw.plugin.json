@@ -18,6 +18,15 @@
           "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
           "pollIntervalMs": { "type": "integer", "minimum": 10000, "maximum": 3600000 }
         }
+      },
+      "coding": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["repositoryPath"],
+        "properties": {
+          "agentId": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$", "default": "coding" },
+          "repositoryPath": { "type": "string", "pattern": "^/" }
+        }
       }
     }
   },

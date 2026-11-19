@@ -2,3 +2,9 @@ dist/
 node_modules/
 .openclaw/
 .local/secrets/
+.local/openclaw-state/
+.local/repositories/
+
+.local/worktrees/
+.local/worktree-projections/
+.local/sandbox/

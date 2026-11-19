@@ -149,6 +149,42 @@ The WBS1 foundation pins OpenClaw `2026.11.3` and its matching plugin SDK. The
 [developer handoff](README.md) records the image digest, toolchain
 versions and Docker build and integration-check commands.
 
+### WBS4 coding execution
+
+`coding.agentId` selects the OpenClaw agent for issue sessions (default
+`coding`). Use that same value in the issue session key and Lobster agent
+argument. Configure the matching agent entry in OpenClaw with its workspace
+and tool policy. Controller capabilities remain in the plugin; the main
+workflow invocation context is distinct from the assigned coding session.
+Designer readiness remains later scope.
+
+Use OpenClaw `sessions.create` with its managed-worktree options to give each
+assigned issue session a distinct checkout from the configured repository
+source. The session worktree is the coding artifact; WBS4 returns its path,
+branch, agent run ID, run status and validation summary through Lobster. WBS4
+does not push or create a pull request; WBS5 owns publication. Pass issue data
+as Lobster workflow arguments to `openclaw.agent`, and re-read the issue before
+starting to ensure it remains open and labeled `ready for agent`.
+
+Configure the OpenClaw Docker sandbox for non-main coding sessions with
+writable worktrees, a read-only container root, dropped capabilities and no
+network egress. Run Lobster from the unsandboxed main controller session and
+target the separate assigned coding session explicitly. The coding sandbox
+receives only its assigned managed worktree; it does not receive Gateway secrets
+or the Docker socket. The Gateway itself needs the host
+Docker socket to create sibling sandbox containers. Keep OpenClaw state in the
+`openclaw-data` named volume; bind its `worktrees`, `worktree-projections`, and
+`sandbox` subdirectories plus the repository source to host directories so
+native sibling containers can mount their workspace and skills. Build the
+pinned `sandbox` Dockerfile target as `openclaw-sandbox:bookworm-slim` before
+starting coding turns. The Gateway image includes a Docker CLI and joins the
+host Docker socket group.
+
+Coding run timeout or malformed/uncertain result remains `needs-inspection` and
+blocks automatic retry. The initial Lobster and coding-agent deadline is 20
+minutes. A GitHub-enabled plugin configuration requires one configured local
+repository checkout path corresponding to the configured GitHub repository.
+
 ## Later scope
 
 Slack approval that causes the Designer agent to label an issue, automatic
