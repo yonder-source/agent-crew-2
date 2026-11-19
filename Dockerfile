@@ -16,7 +16,6 @@ RUN ln -s /app /app/node_modules/openclaw \
 WORKDIR /app/extensions/agent-crew
 COPY --chown=node:node package.json package-lock.json ./
 USER node
-# OpenClaw is supplied by the pinned host image, not installed as a second peer.
 RUN npm ci --include=dev --legacy-peer-deps --ignore-scripts --no-audit --no-fund
 COPY --chown=node:node openclaw.plugin.json tsconfig.json ./
 COPY --chown=node:node src ./src
@@ -24,13 +23,14 @@ RUN npm run build
 
 FROM build AS checks
 COPY --chown=node:node . ./
-CMD ["sh", "-c", "npm run lint && npm run check:lint && npm run typecheck && sh -n scripts/check-all.sh && node scripts/check-config.mjs && node scripts/check-dispatcher-boundaries.mjs"]
+CMD ["sh", "-c", "npm run lint && npm run check:lint && npm run typecheck && sh -n scripts/check-all.sh && node scripts/check-config.mjs && node scripts/check-dispatcher-boundaries.mjs && node scripts/check-wbs3.mjs"]
 
 FROM base AS runtime
 USER root
 RUN mkdir -p /app/extensions/agent-crew && chown node:node /app/extensions/agent-crew
 WORKDIR /app/extensions/agent-crew
 COPY --from=build --chown=node:node /app/extensions/agent-crew/dist ./dist
+COPY --from=build --chown=node:node /app/extensions/agent-crew/node_modules ./node_modules
 COPY --chown=node:node package.json openclaw.plugin.json openclaw.json ./
 COPY --chown=node:node infra/local-dev/openclaw/workflows ./workflows
 COPY --chown=node:node scripts/check-gateway.mjs scripts/session-roundtrip.mjs ./scripts/

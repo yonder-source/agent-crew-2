@@ -18,7 +18,7 @@ async function tool(name, number) {
   assert.equal(result.ok, true, JSON.stringify(result));
   return result.output.details;
 }
-const dispatch = (number) => tool("agent_crew_dispatch", number);
+const dispatch = (number) => call("agent-crew.dispatch", issue(number));
 const status = (number) => tool("agent_crew_status", number);
 const resolve = (number, decision) => call("agent-crew.resolve", { ...issue(number), decision, note: "Synthetic operator inspected fixture" });
 async function count() {
@@ -151,3 +151,18 @@ await ready();
 assert.equal((await dispatch(4)).status, "abandoned");
 assert.equal(await count(), 5);
 console.log("Synthetic WBS2 native sessions, serialization, duplicate suppression, crash recovery and operator decisions passed.");
+
+console.log("Checking issue update marker persistence across a real Gateway restart...");
+const pendingBodyUpdate = {
+  ...a.job, status: "active",
+  issueUpdate: {status:"writing", operationId:"synthetic-interrupted-write", bodyHash:"fixture-hash", updatedAt:new Date().toISOString()},
+};
+await call("sessions.pluginPatch", {key:a.job.sessionKey, pluginId:"agent-crew", namespace:"agent-crew-job", value:pendingBodyUpdate});
+await compose("restart", "gateway");
+await ready();
+const retainedUpdate = await status(1);
+assert.equal(retainedUpdate.job.issueUpdate.status, "needs-inspection");
+assert.equal(retainedUpdate.job.issueUpdate.operationId, "synthetic-interrupted-write");
+const resolvedUpdate = await call("agent-crew.resolve", {...issue(1), target:"issue-update", decision:"abandon", note:"Synthetic restart inspection"});
+assert.equal(resolvedUpdate.job.issueUpdate.status, "abandoned");
+console.log("Synthetic issue update restart marker and operator resolution passed; no live GitHub request.");

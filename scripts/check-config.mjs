@@ -6,6 +6,10 @@ import { join } from "node:path";
 import { parseConfig } from "../src/config.mjs";
 
 assert.deepEqual(parseConfig({ environment: " test " }), { environment: "test" });
+assert.deepEqual(parseConfig({ environment: "test", github: { repository: "Owner/Repo" } }), {
+  environment: "test", github: { repository: "owner/repo", pollIntervalMs: 60_000 },
+});
+assert.throws(() => parseConfig({ environment: "test", github: { repository: "invalid" } }), /GitHub configuration is invalid/);
 assert.throws(() => parseConfig({}), /requires an environment name/);
 assert.throws(() => parseConfig({ environment: " " }), /non-empty environment name/);
 assert.throws(

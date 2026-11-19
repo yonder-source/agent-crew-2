@@ -79,6 +79,10 @@ Later work connects issue discovery and assigned-issue Controller APIs, then the
 real coding runtime, draft PR publication and Slack reporting. Add persistent
 state or recovery behavior only when those slices demonstrate a need.
 
+WBS3 keeps the serialized dispatcher internal to the plugin. Its
+`agent-crew.dispatch` Gateway method is operator-scoped for synthetic checks;
+agents cannot dispatch arbitrary repository/issue pairs.
+
 ## Runtime qualification note
 
 The pinned SDK's plugin-owned session helper requires a custom harness, but the

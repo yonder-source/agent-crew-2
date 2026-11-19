@@ -82,6 +82,37 @@ replacement does not lose its executable path. WBS2 uses synthetic issues and
 workflows only. The executable qualification and its limits are recorded in
 [WBS2](docs/restart/wbs2.md).
 
+## WBS3 GitHub issue access
+
+Use Octokit for GitHub REST requests, with a replaceable credential provider
+that reads a repository-scoped GitHub App installation token from
+`/run/secrets/agent-crew-github-installation-token`. Keep HTTP requests confined
+to the configured repository, bound request duration and response size, validate
+responses, and never automatically resend a write with an uncertain outcome.
+WBS3 does not provision a GitHub App or mint installation tokens.
+
+Poll one configured repository for open issues carrying the exact `ready for
+agent` label. Submit discovered issues through the serialized WBS2 dispatcher;
+repeated discovery returns existing work. Keep the empty-result case distinct
+from provider failure. Arbitrary issue dispatch is available only through the
+operator-scoped `agent-crew.dispatch` Gateway method, not an agent tool.
+
+Expose `agent_crew_issue_read` and `agent_crew_issue_update` as session-bound
+tools using the pinned OpenClaw v2 tool factory's host-provided session key and
+invocation-current guard. Derive repository, issue and job identity from the matching
+`agent-crew-job` session metadata. Agents cannot provide a session key,
+repository or issue number. Allow reads and body-only updates for the active
+assignment in the configured repository. Before a body update, persist its
+operation ID and body hash in session metadata. If a dispatched write has an
+uncertain result or a retained marker is found after restart, block further
+writes and require an operator decision (`confirm`, `retry` or `abandon`) with
+an inspection note through `agent-crew.resolve`.
+
+WBS3 fixture checks qualify provider and authorization logic. Live GitHub
+qualification requires a disposable test repository and a pre-provisioned
+GitHub App installation token with Issues read/write permission; report it
+separately from fixture results.
+
 ## Error handling and retries
 
 | Situation | MVP behavior | WBS |
@@ -238,3 +269,24 @@ For every package, record test commands/results and reusable candidates in local
 project memory; move settled requirements into this specification. Distinguish
 mock, native synthetic and live integration evidence. Extend checks for future
 product capabilities alongside their implementation.
+
+### WBS3 review follow-up
+
+Keep issue body update inspection/abandonment state across workflow retries.
+A live body PATCH remains `writing`; only a retained marker without a live
+in-process operation is treated as interrupted. Operator issue-update decisions
+are rejected while that PATCH is still running. Exclude local GitHub secret
+files from Docker build context as well as Git tracking.
+
+Clear the issue-update marker after a confirmed success or a failure known to be
+safe to retry. Preserve it for uncertain outcomes, including timeouts and
+interrupted writes. Operator `confirm`, `retry` and `abandon` decisions apply
+only after the operation is no longer running, require an inspection note, and
+remain recorded without automatically resending or clearing the inspection
+boundary. Workflow-only retry preserves unresolved issue-update state.
+
+Regression coverage includes discovery polls through the registered dispatcher,
+workflow-only retry with unresolved body writes, rejection of operator
+decisions during a live PATCH, and issue-update marker persistence and
+resolution through a disposable Gateway restart. These checks use fixtures
+and synthetic metadata, not live GitHub writes.

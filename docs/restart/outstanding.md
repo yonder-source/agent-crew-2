@@ -29,8 +29,10 @@ Struck-through items are proposed for later review.
 
 ## New items for review
 
-- [x] **Issue discovery:** Use Controller APIs for GitHub access. Agents can
-  read and write only their assigned issues.
+- [x] **Issue discovery and assigned access:** Use Octokit with a scoped GitHub
+  App installation token. Poll the configured repository for `ready for agent`
+  issues through the WBS2 dispatcher; session-bound plugin tools can read and
+  update only the assigned issue body. See [WBS3](wbs3.md).
 - [x] **Draft PR publication:** Use the current Controller-mediated approach
   for the assigned issue, with credentials supplied through the chosen secret
   mechanism.
