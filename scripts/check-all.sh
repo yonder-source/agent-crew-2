@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-COMPOSE_PROJECT_NAME=agent-crew-wbs2-check
+COMPOSE_PROJECT_NAME=agent-crew-checks
 COMPOSE_FILE=infra/local-dev/openclaw/compose.yaml
 AGENT_CREW_WORKTREE_DIR=$(mktemp -d)
 AGENT_CREW_PROJECTION_DIR=$(mktemp -d)
