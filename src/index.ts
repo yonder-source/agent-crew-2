@@ -8,7 +8,7 @@ import { parseConfig } from "./config.mjs";
 import { IssueDiscovery } from "./discovery.js";
 import { GitHubIssueError, OctokitGitHubIssueProvider } from "./github-issues.js";
 import { GitHubAppClient, GitHubAppError } from "./github-app.js";
-import { cloneRepository } from "./repository-clone.js";
+import { cloneRepository, prepareTaskBase, verifyTaskWorkspace } from "./repository-clone.js";
 import { validateCheckout, type ConnectionCheck } from "./repository-validation.js";
 import { connectionConfig } from "./setup-config.js";
 
@@ -71,6 +71,7 @@ type Job = Issue & {
   codingSummary?: string;
   workspacePath?: string;
   workspaceBranch?: string;
+  baseCommit?: string;
   error?: string;
   decision?: string;
   issueUpdate?: {
@@ -99,6 +100,7 @@ function isJob(value: unknown): value is Job {
       (value.codingSummary !== undefined && typeof value.codingSummary !== "string") ||
       (value.workspacePath !== undefined && typeof value.workspacePath !== "string") ||
       (value.workspaceBranch !== undefined && typeof value.workspaceBranch !== "string") ||
+      (value.baseCommit !== undefined && (typeof value.baseCommit !== "string" || !/^[a-f0-9]{40,64}$/.test(value.baseCommit))) ||
       (value.error !== undefined && typeof value.error !== "string") ||
       (value.decision !== undefined && typeof value.decision !== "string")) return false;
   if (value.issueUpdate === undefined) return true;
@@ -122,6 +124,7 @@ function publicJob(job: Job) {
     ...(job.codingSummary !== undefined ? { codingSummary: job.codingSummary } : {}),
     ...(job.workspacePath !== undefined ? { workspacePath: job.workspacePath } : {}),
     ...(job.workspaceBranch !== undefined ? { workspaceBranch: job.workspaceBranch } : {}),
+    ...(job.baseCommit !== undefined ? { baseCommit: job.baseCommit } : {}),
     ...(job.error !== undefined ? { error: "Workflow outcome requires inspection" } : {}),
     ...(job.decision !== undefined ? { decision: job.decision } : {}),
     ...(job.issueUpdate !== undefined ? { issueUpdate: job.issueUpdate } : {}),
@@ -349,13 +352,23 @@ export default definePluginEntry({
       const existing = await readJob(issue, session);
       if (existing && LOCKED.has(existing.status)) return existing;
       let workspace: { path: string; branch: string } | undefined;
+      let baseCommit = existing?.baseCommit;
       if ((await session) === null) {
         if (config.coding) {
+          if (!config.github) throw new Error("Coding requires a configured GitHub repository.");
+          const branch = `openclaw/agent-crew-issue-${issue.number}`;
+          const token = config.github.appId !== undefined
+            ? await githubApp.installationTokenForRepository(config.github.appId, config.github.installationId, issue.repository)
+            : (await readFile("/run/secrets/agent-crew-github-installation-token", "utf8")).trim();
+          baseCommit = await prepareTaskBase({
+            repository: issue.repository, repositoryPath: config.coding.repositoryPath, branch, token,
+          });
           const created: unknown = await call("sessions.create", {
             key: issueSessionKey(issue),
             cwd: config.coding.repositoryPath,
             worktree: true,
             worktreeName: `agent-crew-issue-${issue.number}`,
+            worktreeBaseRef: baseCommit,
           });
           let worktree = isRecord(created) && isRecord(created.worktree) ? created.worktree : undefined;
           if (!worktree) {
@@ -367,25 +380,37 @@ export default definePluginEntry({
           if (!worktree || typeof worktree.path !== "string" || typeof worktree.branch !== "string") {
             throw new Error("Coding workspace was not created; operator inspection is required");
           }
+          if (worktree.branch !== branch) throw new Error("Created worktree branch differs from the assigned branch.");
           workspace = { path: worktree.path, branch: worktree.branch };
+          await verifyTaskWorkspace({
+            repositoryPath: config.coding.repositoryPath, workspacePath: workspace.path,
+            branch, baseCommit, newlyCreated: true,
+          });
         } else {
           await call("sessions.create", { key: issueSessionKey(issue) });
         }
       } else if (config.coding) {
-        if (existing?.workspacePath && existing.workspaceBranch) {
+        if (existing?.workspacePath && existing.workspaceBranch && baseCommit) {
+          if (existing.workspaceBranch !== `openclaw/agent-crew-issue-${issue.number}`) {
+            throw new Error("Recorded task branch differs from the assigned issue; operator inspection is required.");
+          }
           workspace = { path: existing.workspacePath, branch: existing.workspaceBranch };
+          await verifyTaskWorkspace({
+            repositoryPath: config.coding.repositoryPath, workspacePath: workspace.path,
+            branch: workspace.branch, baseCommit, newlyCreated: false,
+          });
         } else {
-          throw new Error("Coding session already exists without a recorded workspace; operator inspection is required");
+          throw new Error("Coding session lacks a recorded workspace or base commit; operator inspection is required");
         }
       }
       const job = existing
         ? await patchJob(issue, (current) => ({
           ...baseJob(issue),
-          ...(workspace ? { workspacePath: workspace.path, workspaceBranch: workspace.branch } : {}),
+          ...(workspace && baseCommit ? { workspacePath: workspace.path, workspaceBranch: workspace.branch, baseCommit } : {}),
           ...(current.decision ? { decision: current.decision } : {}),
           ...(current.issueUpdate ? { issueUpdate: current.issueUpdate } : {}),
         }))
-          : { ...baseJob(issue), ...(workspace ? { workspacePath: workspace.path, workspaceBranch: workspace.branch } : {}) };
+          : { ...baseJob(issue), ...(workspace && baseCommit ? { workspacePath: workspace.path, workspaceBranch: workspace.branch, baseCommit } : {}) };
       startingJobId = job.jobId;
       if (!existing) await writeJob(issue, job);
       try {

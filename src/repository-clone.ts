@@ -73,6 +73,22 @@ async function createCredentialChannel(repository: string, token: string): Promi
   };
 }
 
+function gitEnvironment(socketPath?: string): NodeJS.ProcessEnv {
+  return {
+    PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
+    ...(process.env.LANG ? { LANG: process.env.LANG } : {}),
+    ...(process.env.LC_ALL ? { LC_ALL: process.env.LC_ALL } : {}),
+    ...(process.env.SSL_CERT_FILE ? { SSL_CERT_FILE: process.env.SSL_CERT_FILE } : {}),
+    ...(process.env.SSL_CERT_DIR ? { SSL_CERT_DIR: process.env.SSL_CERT_DIR } : {}),
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_TRACE: "0",
+    GIT_TRACE_CURL: "0",
+    ...(socketPath ? { AGENT_CREW_CREDENTIAL_SOCKET: socketPath } : {}),
+  };
+}
+
 function sourceUrl(repository: string): string {
   return `https://github.com/${repository.toLowerCase()}.git`;
 }
@@ -128,19 +144,7 @@ export async function cloneRepository(options: {
     ], {
       timeout: 120_000,
       maxBuffer: 1_000_000,
-      env: {
-        PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
-        ...(process.env.LANG ? { LANG: process.env.LANG } : {}),
-        ...(process.env.LC_ALL ? { LC_ALL: process.env.LC_ALL } : {}),
-        ...(process.env.SSL_CERT_FILE ? { SSL_CERT_FILE: process.env.SSL_CERT_FILE } : {}),
-        ...(process.env.SSL_CERT_DIR ? { SSL_CERT_DIR: process.env.SSL_CERT_DIR } : {}),
-        GIT_TERMINAL_PROMPT: "0",
-        GIT_CONFIG_NOSYSTEM: "1",
-        GIT_CONFIG_GLOBAL: "/dev/null",
-        GIT_TRACE: "0",
-        GIT_TRACE_CURL: "0",
-        AGENT_CREW_CREDENTIAL_SOCKET: credential.socketPath,
-      },
+      env: gitEnvironment(credential.socketPath),
     });
     if (!(await inspectRepositoryCheckout(checkout, repository))) throw new Error("Git clone did not create the requested checkout.");
     await rename(checkout, target);
@@ -151,4 +155,86 @@ export async function cloneRepository(options: {
     await credential.close();
     await rm(staging, { recursive: true, force: true });
   }
+}
+
+/** Prepare only a new assignment. A resumed assignment must keep its stored base. */
+export async function prepareTaskBase(options: {
+  repository: string; repositoryPath: string; branch: string; token: string;
+}): Promise<string> {
+  if (!GITHUB_REPOSITORY.test(options.repository) || !options.token ||
+      !/^openclaw\/agent-crew-issue-[1-9][0-9]*$/.test(options.branch)) {
+    throw new Error("Task repository or branch is invalid.");
+  }
+  if (!(await inspectRepositoryCheckout(options.repositoryPath, options.repository))) {
+    throw new Error("Task source checkout is missing.");
+  }
+  const git = async (args: string[], socketPath?: string) => {
+    const result = await execFile("git", ["-C", options.repositoryPath, ...args], {
+      timeout: socketPath ? 120_000 : 10_000, maxBuffer: 1_000_000,
+      env: gitEnvironment(socketPath),
+    });
+    return result.stdout.trim();
+  };
+  if (await git(["status", "--porcelain", "--untracked-files=all"])) {
+    throw new Error("Source checkout is dirty; inspect it before starting a task.");
+  }
+  if (await git(["symbolic-ref", "--short", "HEAD"]) !== "main") {
+    throw new Error("Source checkout must be on main.");
+  }
+  if (await git(["for-each-ref", "--format=%(refname)", `refs/heads/${options.branch}`])) {
+    throw new Error("Task branch already exists; operator inspection is required.");
+  }
+  const credential = await createCredentialChannel(options.repository, options.token);
+  const helper = fileURLToPath(new URL("./git-credential-helper.js", import.meta.url));
+  try {
+    await git([
+      "-c", "credential.helper=", "-c", "credential.useHttpPath=true",
+      "-c", `credential.helper=!${process.execPath} ${helper}`,
+      "fetch", "--no-tags", "origin", "refs/heads/main",
+    ], credential.socketPath);
+  } catch {
+    throw new Error("Fetching remote main failed; inspect access and remote main.");
+  } finally {
+    await credential.close();
+  }
+  // FETCH_HEAD is the exact fetched main, never an old remote-tracking ref.
+  const baseCommit = await git(["rev-parse", "--verify", "FETCH_HEAD^{commit}"]);
+  if (!/^[a-f0-9]{40,64}$/.test(baseCommit)) throw new Error("Fetched main commit is invalid.");
+  try {
+    await git(["merge-base", "--is-ancestor", "refs/heads/main", baseCommit]);
+  } catch {
+    throw new Error("Local main is ahead of or divergent from remote main; inspect before starting.");
+  }
+  // A concurrent local edit must not be overwritten during fast-forward.
+  if (await git(["status", "--porcelain", "--untracked-files=all"]) ||
+      await git(["symbolic-ref", "--short", "HEAD"]) !== "main") {
+    throw new Error("Source checkout changed during preparation; inspect before starting.");
+  }
+  await git(["-c", "core.hooksPath=/dev/null", "merge", "--ff-only", baseCommit]);
+  if (await git(["rev-parse", "HEAD"]) !== baseCommit) {
+    throw new Error("Source main did not reach the fetched base commit.");
+  }
+  return baseCommit;
+}
+
+export async function verifyTaskWorkspace(options: {
+  repositoryPath: string; workspacePath: string; branch: string; baseCommit: string;
+  newlyCreated: boolean;
+}): Promise<void> {
+  if (!/^openclaw\/agent-crew-issue-[1-9][0-9]*$/.test(options.branch) ||
+      !/^[a-f0-9]{40,64}$/.test(options.baseCommit)) {
+    throw new Error("Task branch or base binding is invalid; operator inspection is required.");
+  }
+  const git = async (path: string, args: string[]) => (await execFile("git", ["-C", path, ...args], {
+    timeout: 10_000, maxBuffer: 16_384, env: gitEnvironment(),
+  })).stdout.trim();
+  const commonDirectory = async (path: string) => realpath(await git(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"]));
+  if (await commonDirectory(options.repositoryPath) !== await commonDirectory(options.workspacePath) ||
+      await git(options.workspacePath, ["symbolic-ref", "--short", "HEAD"]) !== options.branch) {
+    throw new Error("Task worktree does not match its repository and branch binding.");
+  }
+  if (options.newlyCreated && await git(options.workspacePath, ["rev-parse", "HEAD"]) !== options.baseCommit) {
+    throw new Error("New task worktree does not match the assigned base commit.");
+  }
+  await git(options.workspacePath, ["merge-base", "--is-ancestor", options.baseCommit, "HEAD"]);
 }

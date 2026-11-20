@@ -249,3 +249,57 @@ Deployed to persistent local Claw after confirming zero active runs. Gateway
 health and served Apply assets passed. The operator's saved draft is retained;
 the active repository remains empty and scheduling stays paused until the
 operator applies that draft. No real task connection was activated by deployment.
+
+
+## Batch 3 implementation — 2026-11-20
+
+The batch 2 supplement defines new-task branch collision handling, exact base
+commit binding and batch 6 committed-deliverable contracts in SPEC and WBS4.5.
+
+Pinned OpenClaw `2026.11.3` hardcodes `openclaw/${name}` in managed worktree
+preparation (`service-preparation` runtime); sessions.create exposes a name and
+base ref, but no branch override. The operator approved keeping the existing
+`agent-crew-issue-<number>` name, producing
+`openclaw/agent-crew-issue-<number>`. Do not rename branches behind native metadata.
+
+Dispatch now prepares a clean source checkout on main using a short-lived
+Contents-read token and the existing private credential socket. It rejects an
+existing task branch, fetches remote main, rejects ahead/divergent local main and
+fast-forwards only. It passes the exact fetched SHA as worktreeBaseRef. Before
+starting coding it verifies the returned branch, actual worktree HEAD and common
+Git directory, then retains baseCommit with job/session/issue/repository and
+workspace binding. Public operator status includes baseCommit.
+
+An operator-approved retry reuses the recorded base and worktree without fetch
+or recreation, verifying branch ownership and base ancestry first. Legacy or
+orphaned sessions without a retained base require inspection and cannot resume
+by guessing their base; the existing coding fixture expectation reflects this.
+The VM harness dependencies were updated for the new Git boundary.
+
+Local lint and typecheck passed. Runtime checks, live authenticated fetch/task
+execution and deployment of this batch have not been performed; this is an
+implementation handoff, not live acceptance.
+
+
+### Batch 3 local deployment and checks — 2026-11-20
+
+Rebuilt and recreated the persistent Gateway with the base and setup Compose
+files. Before restart, the full session inventory contained five sessions, all
+reporting no active run. After restart the container was healthy, the saved draft
+was retained, and the deployed compiled dispatcher contained the exact-base
+worktree parameter. Polling remains stopped with `No active repository connection`;
+no configuration was applied and no coding task was launched by deployment.
+
+The compiled coding/dispatcher VM boundary checks passed. A temporary isolated
+Git check (`/tmp/agent-crew-batch3-check.mjs`) exercised fast-forward to the exact
+fetched SHA, actual worktree branch/common-directory/HEAD checks, branch collision,
+resume with descendant commits, wrong initial HEAD/workspace rejection, dirty
+source, local-ahead rejection and missing remote main. Its fetch command was
+redirected to a disposable local bare remote; it does not establish GitHub
+credential access or native session/model acceptance. The credential socket
+required elevated execution because the filesystem sandbox forbids socket listen.
+
+Live acceptance still requires applying a disposable repository connection and
+labeling a small issue `ready for agent`, then inspecting the retained task's
+baseCommit/workspaceBranch/workspacePath and actual Git checkout. Do not count
+health or fixture checks as that acceptance.

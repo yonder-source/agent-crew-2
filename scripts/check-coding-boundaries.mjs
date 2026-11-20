@@ -13,7 +13,7 @@ const source = readFileSync("dist/index.js", "utf8")
 const issue = { repository: "owner/repo", issueNumber: 7 };
 const repositoryPath = "/workspaces/repositories/owner/repo";
 const workspacePath = "/home/node/.openclaw/worktrees/fixture/issue-7";
-const branch = "openclaw/issue-7";
+const branch = "openclaw/agent-crew-issue-7";
 
 function harness(initialSession = null) {
   let session = initialSession;
@@ -28,6 +28,9 @@ function harness(initialSession = null) {
   const registeredTools = new Map();
   const context = createContext({
     createHash, randomUUID,
+    readFile: async () => "fixture-token",
+    prepareTaskBase: async () => "a".repeat(40),
+    verifyTaskWorkspace: async () => {},
     process: { env: { AGENT_CREW_GATEWAY_TOKEN: "test" } },
     assignedIssueFromSession, trustedSessionKey,
     connectionConfig,
@@ -164,10 +167,9 @@ assert.equal(resolution.ok, true);
 assert.equal(resolution.value.job.status, "retry-approved");
 assert.equal(orphan.session().pluginExtensions[0].value.workspacePath, workspacePath);
 const resumed = await orphan.method("agent-crew.dispatch", issue);
-assert.equal(resumed.ok, true);
-assert.equal(resumed.value.job.status, "completed");
+assert.equal(resumed.ok, false);
 assert.equal(orphan.calls.filter((call) => call.method === "sessions.create").length, 0);
-assert.equal(orphan.calls.filter((call) => call.method === "tools.invoke").length, 1);
+assert.equal(orphan.calls.filter((call) => call.method === "tools.invoke").length, 0);
 
 const setup = harness();
 const cloneParams = { appId: "123", installationId: 17, repository: "owner/repo", repositoryPath };
