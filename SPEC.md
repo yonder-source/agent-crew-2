@@ -258,10 +258,12 @@ network egress. Run Lobster from the unsandboxed main controller session and
 target the separate assigned coding session explicitly. The coding sandbox
 receives only its assigned managed worktree; it does not receive Gateway secrets
 or the Docker socket. The Gateway itself needs the host
-Docker socket to create sibling sandbox containers. Keep OpenClaw state in the
-`openclaw-data` named volume; bind its `worktrees`, `worktree-projections`, and
-`sandbox` subdirectories plus the repository source to host directories so
-native sibling containers can mount their workspace and skills. Build the
+Docker socket to create sibling sandbox containers. Keep OpenClaw state in a
+host bind mount, and create temporary inference workspaces under its `tmp`
+directory so sibling sandboxes can mount them. Bind its `worktrees`,
+`worktree-projections`, and `sandbox` subdirectories plus the repository source
+to host directories so native sibling containers can mount their workspace and
+skills. Preserve existing state when migrating from the named volume. Build the
 pinned `sandbox` Dockerfile target as `openclaw-sandbox:bookworm-slim` before
 starting coding turns. The Gateway image includes a Docker CLI and joins the
 host Docker socket group.
@@ -322,7 +324,7 @@ and final acceptance.
 typescript-eslint recommended typed rules to TypeScript, including declarations.
 The resolved typed preset already enables floating/misused Promise checks;
 `no-unsafe-type-assertion` is added explicitly because the preset omits it.
-Only installed dependencies and compiled output are ignored. Application code,
+Installed dependencies, compiled output and local state are ignored. Application code,
 scripts, JavaScript workflows and retained JavaScript evidence are linted.
 JavaScript receives syntax/scope rules; typed checks apply to the TypeScript
 project. Input boundaries use runtime guards instead of narrowing assertions.

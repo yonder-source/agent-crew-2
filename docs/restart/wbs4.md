@@ -27,10 +27,12 @@ SPEC](../../SPEC.md) defines the MVP workflow.
 **Work:** Configure OpenClaw's Docker backend and create one native managed
 worktree per issue session from the configured repository checkout. Sandbox all
 non-main sessions; keep the main controller session unsandboxed so it can run
-the trusted Lobster workflow. The Gateway keeps state in the `openclaw-data`
-named volume. Its `worktrees`, `worktree-projections`, and `sandbox`
-subdirectories and repository source use host binds so sibling containers can
-mount their workspace and skills. Build the pinned `sandbox` Dockerfile target
+the trusted Lobster workflow. The Gateway state directory and temporary
+inference workspaces use a host bind so sibling sandboxes can mount their
+sources. Its `worktrees`, `worktree-projections`, and `sandbox` subdirectories
+and repository source use host binds so sibling containers can mount their
+workspace and skills. Preserve existing state when migrating from the named
+volume. Build the pinned `sandbox` Dockerfile target
 as `openclaw-sandbox:bookworm-slim` before starting coding turns. The Gateway
 includes a Docker CLI, joins the host Docker socket group, and passes only the
 assigned worktree to the coding sandbox.

@@ -60,9 +60,9 @@ surviving a Gateway restart, plus synthetic dispatcher interruption checks:
 ./scripts/check-all.sh
 ```
 
-Gateway state is stored in the named Docker volume `agent-crew-2_openclaw-data`
-(Compose prefixes the volume with its project name). Remove this disposable
-state with `docker compose -f infra/local-dev/openclaw/compose.yaml down --volumes`.
+Gateway state is stored under `.local/openclaw-gateway-state` on the Docker host
+and remains ignored by Git. The local setup preserves the original named volume
+as a rollback copy after migrating its contents into this bind-mounted directory.
 
 ## Disposable session check
 

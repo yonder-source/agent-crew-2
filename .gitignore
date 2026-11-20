@@ -4,6 +4,7 @@ node_modules/
 .local/secrets/
 .local/openclaw-coding.json
 .local/openclaw-state/
+.local/openclaw-gateway-state/
 .local/repositories/
 .local/skills/
 

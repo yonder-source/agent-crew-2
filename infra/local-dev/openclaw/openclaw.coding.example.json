@@ -4,6 +4,9 @@
     "auth": {
       "mode": "token",
       "token": "${OPENCLAW_GATEWAY_TOKEN}"
+    },
+    "controlUi": {
+      "experimental": { "customPlugins": true }
     }
   },
   "plugins": {
@@ -15,7 +18,8 @@
     },
     "allow": [
       "agent-crew",
-      "lobster"
+      "lobster",
+      "openai"
     ],
     "entries": {
       "agent-crew": {
