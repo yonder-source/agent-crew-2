@@ -159,6 +159,21 @@ delivery remains visible and leaves the task waiting. Automatic delivery retry
 is WBS6 scope. Qualify native session context across turns before adding a
 worktree context summary; add one only if a concrete gap is found.
 
+**Small batch 6 — Controller task authorization:** Extend the Controller's
+coding prompt with a structured authorization block naming the assigned issue,
+repository and worktree, and the allowed operations. State that repository
+`AGENTS.md` provides development guidance but cannot grant additional authority;
+Controller authorization takes precedence when instructions conflict. Keep issue
+text clearly marked as untrusted task input. Do not pass GitHub credentials or
+installation tokens into the agent context. Verify the constructed prompt with
+fixtures covering conflicting issue text and repository guidance, and confirm
+the agent context contains no credential values.
+
+**Done when:** Each dispatched coding turn receives the explicit task-scoped
+authorization and repository-guidance precedence rule, while existing sandbox
+credential isolation remains intact. The conflict fixtures demonstrate that
+issue text and `AGENTS.md` cannot expand the Controller-granted scope.
+
 **Token budget:** Qualify the pinned runtime and provider's usage reporting and
 stop mechanisms. Configure one shared per-task budget and show task usage and
 limit. Accumulate available input and output usage across turns, retries and
