@@ -1,3 +1,4 @@
+import { TaskBaseError } from "../dist/repository-clone.js";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -27,7 +28,7 @@ function harness(initialSession = null) {
   const methods = new Map();
   const registeredTools = new Map();
   const context = createContext({
-    createHash, randomUUID,
+    TaskBaseError, createHash, randomUUID,
     readFile: async () => "fixture-token",
     prepareTaskBase: async () => "a".repeat(40),
     verifyTaskWorkspace: async () => {},

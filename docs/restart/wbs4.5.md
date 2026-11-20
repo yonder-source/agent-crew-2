@@ -134,7 +134,9 @@ setup prerequisite and the secret delivery and rotation responsibilities.
   and retained job/session/issue/repository/worktree/branch/base binding. Stop on
   dirty checkout, missing main, divergence, branch collision or uncertain setup.
   Use the native `openclaw/agent-crew-issue-<number>` branch naming; keep
-  OpenClaw managed metadata intact.
+  OpenClaw managed metadata intact. Support clean unborn main from an empty clone
+  by initializing it to the fetched commit. Keep dirty/ahead/divergent checks and
+  report safe task-preparation error categories separately from query failures.
 - **Batch 6 supplement:** Require local commits and structured validation records
   (command, outcome, exit code when available, summary). The Controller verifies
   the assigned branch and head SHA and persists delivery status. WBS5 reads the

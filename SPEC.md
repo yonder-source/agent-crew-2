@@ -267,7 +267,12 @@ existing branch blocks a new task and requires inspection; resuming an already
 bound task reuses its recorded branch and base without pulling or recreating it.
 Stop and report the reason if the checkout is dirty, local and remote `main`
 have diverged, remote `main` is missing, or the update fails; never overwrite
-local changes or automatically merge divergent histories.
+local changes or automatically merge divergent histories. A clean source checkout
+with symbolic HEAD on main but no local main ref (an empty clone) may initialize
+main from the fetched commit. Other Git failures must not be treated as unborn.
+Distinguish safe task-preparation failures from GitHub query failures in polling
+status; report dirty source, branch collision, unavailable remote main and local
+ahead/divergent main without exposing raw Git output or credentials.
 Bind the job, session, issue, repository, worktree, branch and base commit in
 retained Controller state. Small batch 6 adds local committed deliverables,
 structured validation evidence and a Controller-verified head SHA. WBS5 obtains

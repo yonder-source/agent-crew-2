@@ -303,3 +303,47 @@ Live acceptance still requires applying a disposable repository connection and
 labeling a small issue `ready for agent`, then inspecting the retained task's
 baseCommit/workspaceBranch/workspacePath and actual Git checkout. Do not count
 health or fixture checks as that acceptance.
+
+
+### Batch 3 empty-clone regression repair — 2026-11-20
+
+Added a retained regression in `scripts/check-repository-connection.mjs` that
+clones an empty local bare repository before its first main commit is pushed.
+The pre-fix build failed at the ancestor check, reproducing the reported bug.
+After the fix it initializes clean symbolic main to the exact fetched SHA and
+verifies clean status and a real task worktree. Dirty unborn checkout, existing
+branch collision, local-ahead and divergent main remain rejected. Fetch is
+redirected to the local fixture remote; this test does not qualify GitHub auth.
+
+`prepareTaskBase` now checks the existence of the exact local main ref without
+interpreting arbitrary Git exceptions as unborn. It retains the symbolic-main
+and clean-checkout guards and uses non-forced Git fast-forward merge for initial
+materialization. Static TaskBaseError codes provide safe messages; discovery
+reports query versus dispatch phase separately. Raw errors are not included in
+polling status/log messages. Discovery phase regressions and existing dispatcher,
+coding and repository fixtures passed, as did lint/build.
+
+
+Live deployment after this repair became healthy and startup polling admitted
+`yonder-source/disposable-test-repo#1`. The task uses branch
+`openclaw/agent-crew-issue-1`, worktree
+`/home/node/.openclaw/worktrees/c2f6b1f78d368c73/agent-crew-issue-1`, and retained
+base SHA `58167c1984704af01b4853b55d8b11a29bf8b11f`, matching the initialized
+remote main. Thus the actual empty-clone path passed authenticated fetch,
+initialization and native session/worktree binding.
+
+The next boundary failed before an agent turn started: Lobster reported
+`openclaw.agent --timeout must be a non-negative integer in seconds`. The job
+is retained as needs-inspection with no active run; no retry was authorized or
+performed. An attempted manual scheduling resume after startup admission was
+correctly blocked by that retained job. Polling status itself remains running
+and duplicate discovery cannot rerun the locked job.
+
+Further inspection found the existing coding workflow passes shell-style
+`$LOBSTER_ARG_*` variables to a native pipeline command, whose template resolver
+does not perform shell expansion. Its camelCase argument names also normalize
+to e.g. `TIMEOUTSECONDS`, not `TIMEOUT_SECONDS`. This is a separate existing
+WBS4 workflow invocation defect; full coding acceptance is not achieved.
+A read-only tools.effective snapshot also did not list agent_crew_issue_read or
+agent_crew_issue_update in the session's plugin inventory; this does not prove
+model-visible tool delivery and remains with the separate visibility investigation.

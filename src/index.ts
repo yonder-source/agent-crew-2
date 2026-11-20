@@ -8,7 +8,7 @@ import { parseConfig } from "./config.mjs";
 import { IssueDiscovery } from "./discovery.js";
 import { GitHubIssueError, OctokitGitHubIssueProvider } from "./github-issues.js";
 import { GitHubAppClient, GitHubAppError } from "./github-app.js";
-import { cloneRepository, prepareTaskBase, verifyTaskWorkspace } from "./repository-clone.js";
+import { cloneRepository, prepareTaskBase, verifyTaskWorkspace, TaskBaseError } from "./repository-clone.js";
 import { validateCheckout, type ConnectionCheck } from "./repository-validation.js";
 import { connectionConfig } from "./setup-config.js";
 
@@ -801,11 +801,15 @@ export default definePluginEntry({
         onComplete: (count) => api.logger.info(count === 0
           ? "GitHub issue discovery completed; no ready issues found."
           : `GitHub issue discovery completed; processed ${count} ready issue(s).`),
-        onFailure: () => {
+        onFailure: (error, phase) => {
           pollingReady = false;
-          pollingReason = "GitHub discovery failed; verify credentials and task state.";
+          pollingReason = phase === "dispatch"
+            ? error instanceof TaskBaseError
+              ? `Task preparation blocked [${error.code}]: ${error.message}`
+              : "Task dispatch failed; inspect the source checkout and retained task state."
+            : "GitHub issue query failed; verify repository access and credentials.";
           issueDiscovery.pause();
-          api.logger.error("GitHub issue discovery failed; no empty-result state was recorded.");
+          api.logger.error(pollingReason);
         },
       });
       discovery = issueDiscovery;

@@ -157,6 +157,23 @@ export async function cloneRepository(options: {
   }
 }
 
+const TASK_BASE_MESSAGES = {
+  SOURCE_DIRTY: "Source checkout is dirty; inspect it before starting a task.",
+  SOURCE_NOT_MAIN: "Source checkout must be on main.",
+  TASK_BRANCH_EXISTS: "Task branch already exists; operator inspection is required.",
+  REMOTE_MAIN_UNAVAILABLE: "Fetching remote main failed; verify access and remote main.",
+  SOURCE_MAIN_DIVERGED: "Local main is ahead of or divergent from remote main; inspect before starting.",
+  SOURCE_CHANGED: "Source checkout changed during preparation; inspect before starting.",
+  SOURCE_BASE_MISMATCH: "Source main did not reach the fetched base commit.",
+} as const;
+
+export class TaskBaseError extends Error {
+  constructor(readonly code: keyof typeof TASK_BASE_MESSAGES) {
+    super(TASK_BASE_MESSAGES[code]);
+    this.name = "TaskBaseError";
+  }
+}
+
 /** Prepare only a new assignment. A resumed assignment must keep its stored base. */
 export async function prepareTaskBase(options: {
   repository: string; repositoryPath: string; branch: string; token: string;
@@ -176,13 +193,13 @@ export async function prepareTaskBase(options: {
     return result.stdout.trim();
   };
   if (await git(["status", "--porcelain", "--untracked-files=all"])) {
-    throw new Error("Source checkout is dirty; inspect it before starting a task.");
+    throw new TaskBaseError("SOURCE_DIRTY");
   }
   if (await git(["symbolic-ref", "--short", "HEAD"]) !== "main") {
-    throw new Error("Source checkout must be on main.");
+    throw new TaskBaseError("SOURCE_NOT_MAIN");
   }
   if (await git(["for-each-ref", "--format=%(refname)", `refs/heads/${options.branch}`])) {
-    throw new Error("Task branch already exists; operator inspection is required.");
+    throw new TaskBaseError("TASK_BRANCH_EXISTS");
   }
   const credential = await createCredentialChannel(options.repository, options.token);
   const helper = fileURLToPath(new URL("./git-credential-helper.js", import.meta.url));
@@ -193,26 +210,32 @@ export async function prepareTaskBase(options: {
       "fetch", "--no-tags", "origin", "refs/heads/main",
     ], credential.socketPath);
   } catch {
-    throw new Error("Fetching remote main failed; inspect access and remote main.");
+    throw new TaskBaseError("REMOTE_MAIN_UNAVAILABLE");
   } finally {
     await credential.close();
   }
   // FETCH_HEAD is the exact fetched main, never an old remote-tracking ref.
   const baseCommit = await git(["rev-parse", "--verify", "FETCH_HEAD^{commit}"]);
   if (!/^[a-f0-9]{40,64}$/.test(baseCommit)) throw new Error("Fetched main commit is invalid.");
-  try {
-    await git(["merge-base", "--is-ancestor", "refs/heads/main", baseCommit]);
-  } catch {
-    throw new Error("Local main is ahead of or divergent from remote main; inspect before starting.");
+  // A clean clone of an empty remote has symbolic HEAD=main but no main ref.
+  // Query refs without swallowing Git failures as an unborn-branch result.
+  const localMain = await git(["for-each-ref", "--format=%(refname)", "refs/heads/main"]);
+  const mainExists = localMain.split("\n").includes("refs/heads/main");
+  if (mainExists) {
+    try {
+      await git(["merge-base", "--is-ancestor", "refs/heads/main", baseCommit]);
+    } catch {
+      throw new TaskBaseError("SOURCE_MAIN_DIVERGED");
+    }
   }
   // A concurrent local edit must not be overwritten during fast-forward.
   if (await git(["status", "--porcelain", "--untracked-files=all"]) ||
       await git(["symbolic-ref", "--short", "HEAD"]) !== "main") {
-    throw new Error("Source checkout changed during preparation; inspect before starting.");
+    throw new TaskBaseError("SOURCE_CHANGED");
   }
   await git(["-c", "core.hooksPath=/dev/null", "merge", "--ff-only", baseCommit]);
   if (await git(["rev-parse", "HEAD"]) !== baseCommit) {
-    throw new Error("Source main did not reach the fetched base commit.");
+    throw new TaskBaseError("SOURCE_BASE_MISMATCH");
   }
   return baseCommit;
 }

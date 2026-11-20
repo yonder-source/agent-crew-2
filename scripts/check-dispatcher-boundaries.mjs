@@ -1,3 +1,4 @@
+import { TaskBaseError } from "../dist/repository-clone.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
@@ -22,7 +23,7 @@ const tools = new Map();
 const methods = new Map();
 let issueToolFactory;
 const context = createContext({
-  createHash, randomUUID, process: { env: { AGENT_CREW_GATEWAY_TOKEN: "test" } },
+  TaskBaseError, createHash, randomUUID, process: { env: { AGENT_CREW_GATEWAY_TOKEN: "test" } },
   assignedIssueFromSession, trustedSessionKey,
   GitHubAppClient,
   Type: new Proxy({}, { get: () => () => ({}) }),
