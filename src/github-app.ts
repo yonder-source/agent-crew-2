@@ -12,7 +12,7 @@ type GitHubAppClientOptions = {
   timeoutMs?: number;
 };
 
-type Installation = { id: number; account: { login: string } };
+type Installation = { id: number; account: { login: string }; permissions: Record<string, string> };
 type Repository = { id: number; full_name: string; default_branch: string };
 
 export class GitHubAppError extends Error {
@@ -42,7 +42,13 @@ function parseInstallation(value: unknown): Installation {
       !isRecord(value.account) || typeof value.account.login !== "string") {
     throw new GitHubAppError("GITHUB_RESPONSE_INVALID", "GitHub returned an invalid installation.");
   }
-  return { id: Number(value.id), account: { login: value.account.login } };
+  const permissions: Record<string, string> = {};
+  if (isRecord(value.permissions)) {
+    for (const [name, level] of Object.entries(value.permissions)) {
+      if (typeof level === "string") permissions[name] = level;
+    }
+  }
+  return { id: Number(value.id), account: { login: value.account.login }, permissions };
 }
 
 function parseRepository(value: unknown): Repository {
@@ -125,6 +131,20 @@ export class GitHubAppClient {
     installationId: unknown,
     repositoryValue: unknown,
   ): Promise<string> {
+    const selected = await this.resolveRepository(appIdValue, installationId, repositoryValue);
+    return this.createInstallationToken(selected.installation.id, selected.jwt, selected.repository.id);
+  }
+
+  async repositoryAccess(appId: unknown, installationId: unknown, repository: unknown): Promise<{
+    repository: string; permissions: Record<string, string>;
+  }> {
+    const selected = await this.resolveRepository(appId, installationId, repository);
+    return { repository: selected.repository.full_name, permissions: selected.installation.permissions };
+  }
+
+  private async resolveRepository(appIdValue: unknown, installationId: unknown, repositoryValue: unknown): Promise<{
+    jwt: string; installation: Installation; repository: Repository;
+  }> {
     const appId = parseAppId(appIdValue);
     if (typeof installationId !== "number" || !Number.isSafeInteger(installationId) || installationId < 1 ||
         typeof repositoryValue !== "string" || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repositoryValue)) {
@@ -133,14 +153,15 @@ export class GitHubAppClient {
     const selectedInstallationId = installationId;
     const jwt = await this.createJwt(appId);
     const installations = await this.listPages<Installation>("/app/installations", jwt, parseInstallation);
-    if (!installations.some((installation) => installation.id === selectedInstallationId)) {
+    const installation = installations.find((item) => item.id === selectedInstallationId);
+    if (!installation) {
       throw new GitHubAppError("GITHUB_INSTALLATION_INVALID", "The selected installation is not available to this GitHub App.");
     }
     const token = await this.createInstallationToken(selectedInstallationId, jwt);
     const repositories = await this.listPages<Repository>("/installation/repositories", token, parseRepository);
     const selected = repositories.find((repository) => repository.full_name === repositoryValue.toLowerCase());
     if (!selected) throw new GitHubAppError("GITHUB_REPOSITORY_INACCESSIBLE", "The selected repository is not accessible to this installation.");
-    return this.createInstallationToken(selectedInstallationId, jwt, selected.id);
+    return { jwt, installation, repository: selected };
   }
 
   private async createJwt(appId: string): Promise<string> {

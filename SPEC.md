@@ -65,7 +65,10 @@ Compare the source checkout's Git remote with the selected repository; distingui
 granted App permissions from confirmed write outcomes. Authenticated
 operator authorization is required for reads, validation and changes; assigned
 coding agents cannot invoke these operations. Save stores a pending draft without
-changing the running configuration, including while work is active. Apply checks
+changing the running configuration, including while work is active. Saving a draft automatically runs
+read-only connection validation and displays individual results in the status
+area; provide a control to repeat validation of the saved draft. Missing checkout
+is reported as pending and does not cause validation to clone it. Apply checks
 for active or uncertain work and blocks connection changes while it exists. After
 the check, stop automatic polling and new admission while preparing the source
 checkout and applying the configuration; preserve the last valid configuration on

@@ -77,7 +77,7 @@ function sourceUrl(repository: string): string {
   return `https://github.com/${repository.toLowerCase()}.git`;
 }
 
-async function assertRepositoryCheckout(path: string, repository: string): Promise<boolean> {
+export async function inspectRepositoryCheckout(path: string, repository: string): Promise<boolean> {
   let pathStat: Awaited<ReturnType<typeof lstat>>;
   try {
     pathStat = await lstat(path);
@@ -113,7 +113,7 @@ export async function cloneRepository(options: {
   await mkdir(dirname(target), { recursive: true });
   const parentReal = await realpath(dirname(target));
   if (!inside(rootReal, parentReal)) throw new Error("Checkout path resolves outside the configured repository directory.");
-  if (await assertRepositoryCheckout(target, repository)) return { repositoryPath: target, status: "already-present" };
+  if (await inspectRepositoryCheckout(target, repository)) return { repositoryPath: target, status: "already-present" };
 
   const staging = await mkdtemp(join(parentReal, ".agent-crew-clone-"));
   const checkout = join(staging, "checkout");
@@ -142,7 +142,7 @@ export async function cloneRepository(options: {
         AGENT_CREW_CREDENTIAL_SOCKET: credential.socketPath,
       },
     });
-    if (!(await assertRepositoryCheckout(checkout, repository))) throw new Error("Git clone did not create the requested checkout.");
+    if (!(await inspectRepositoryCheckout(checkout, repository))) throw new Error("Git clone did not create the requested checkout.");
     await rename(checkout, target);
     return { repositoryPath: target, status: "cloned" };
   } catch {

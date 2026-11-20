@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GitHubAppClient } from "../dist/github-app.js";
 import { cloneRepository } from "../dist/repository-clone.js";
+import { validateCheckout } from "../dist/repository-validation.js";
 
 const privateKey = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs8", format: "pem" });
 const requests = [];
@@ -14,7 +15,7 @@ const client = new GitHubAppClient({
   fetcher: async (url, options) => {
     const path = new URL(url).pathname;
     requests.push({ path, body: options.body ? JSON.parse(options.body) : null });
-    if (path === "/app/installations") return Response.json([{ id: 17, account: { login: "owner" } }]);
+    if (path === "/app/installations") return Response.json([{ id: 17, account: { login: "owner" }, permissions: { contents: "write", issues: "read", pull_requests: "write" } }]);
     if (path.endsWith("/access_tokens")) return Response.json({ token: "fixture-token", expires_at: "2099-01-01T00:00:00Z" });
     if (path === "/installation/repositories") return Response.json({ repositories: [
       { id: 23, full_name: "owner/repo", default_branch: "main" },
@@ -27,6 +28,9 @@ assert.deepEqual(await client.listAccessibleRepositories("123"), [
 ]);
 assert.equal(await client.installationTokenForRepository("123", 17, "owner/repo"), "fixture-token");
 assert.deepEqual(requests.at(-1).body, { repository_ids: [23], permissions: { contents: "read" } });
+assert.deepEqual(await client.repositoryAccess("123", 17, "owner/repo"), {
+  repository: "owner/repo", permissions: { contents: "write", issues: "read", pull_requests: "write" },
+});
 await assert.rejects(client.installationTokenForRepository("123", 18, "owner/repo"), /installation is not available/);
 await assert.rejects(client.installationTokenForRepository("123", 17, "owner/other"), /not accessible/);
 await assert.rejects(client.listAccessibleRepositories("invalid"), /positive integer/);
@@ -67,8 +71,12 @@ try {
   git("-C", checkout, "remote", "add", "origin", "https://github.com/owner/repo.git");
   const options = { repository: "owner/repo", repositoryPath: checkout, token: "fixture-token" };
   assert.equal((await cloneRepository(options)).status, "already-present");
+  assert.equal((await validateCheckout("owner/repo", checkout)).status, "passed");
+  assert.equal((await validateCheckout("owner/repo", join(root, "absent", "repo"))).status, "pending");
+  await assert.rejects(readFile(join(root, "absent", "repo")), { code: "ENOENT" });
   git("-C", checkout, "remote", "set-url", "origin", "https://github.com/owner/other.git");
   await assert.rejects(cloneRepository(options), /remote does not match/);
+  assert.equal((await validateCheckout("owner/repo", checkout)).status, "failed");
   assert.equal(git("-C", checkout, "remote", "get-url", "origin").trim(), "https://github.com/owner/other.git");
   const nonGit = join(root, "owner", "nongit");
   await mkdir(nonGit);
@@ -78,6 +86,7 @@ try {
   await assert.rejects(cloneRepository({ ...options, repositoryPath: "/tmp/outside-repository-root" }), /inside the configured/);
   await symlink(tmpdir(), join(root, "escape"));
   await assert.rejects(cloneRepository({ ...options, repositoryPath: join(root, "escape", "repo") }), /outside the configured/);
+  assert.equal((await validateCheckout("owner/repo", join(root, "escape", "repo"))).status, "failed");
   assert.deepEqual((await readdir(join(root, "owner"))).sort(), ["nongit", "repo"]);
 } finally {
   if (previousRoot === undefined) delete process.env.AGENT_CREW_REPOSITORY_ROOT;

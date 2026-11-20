@@ -181,3 +181,27 @@ The operator reported that Save and clone were manually tested successfully in
 the persistent local Claw on 2026-11-20. This supplements the automated native
 Gateway and fixture checks above; Apply and task-tool visibility are not covered
 by that manual confirmation.
+
+## Saved-connection validation — 2026-11-20
+
+Added the operator-admin `agent-crew.setup.validate` method. It validates the
+retained draft, verifies App/installation repository access, reports Contents,
+Issues and Pull requests grants separately from untested write outcomes, checks
+the checkout remote without cloning, and confirms configured coding/designer
+agent IDs. An absent checkout is pending rather than a failed GitHub connection.
+Validation never creates checkout directories or changes the active connection.
+Save automatically invokes validation, with individual results in the right-hand
+status area; operators can repeat it with Validate saved connection.
+
+The pinned checks image passes all existing checks plus permission parsing and
+read-only checkout regression cases. A separate Gateway with the real PEM and
+a read-only host checkout mount accepted the real App grants, reported absent
+checkout as pending, rejected a missing agent, rejected low-scope validation and
+rejected validation without a saved draft. Chromium with fixture RPCs confirmed
+Save triggers validation and renders its results. Apply, renewal and polling
+lifecycle remain subsequent work; this change does not enable task admission.
+Deployed the validation change to the persistent local Claw after confirming no
+active runs. The served asset contains the validation control; the user's
+existing saved draft passed repository read, granted permissions, checkout
+remote, coding and designer agent checks. Actual write operations remain
+explicitly unverified. Gateway health passed after deployment.

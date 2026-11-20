@@ -53,3 +53,16 @@
 @media (max-width: 700px) {
   .agent-crew-setup { grid-template-columns: 1fr; }
 }
+
+.agent-crew-check-status[data-status="passed"] {
+  color: var(--success, #15803d);
+}
+
+.agent-crew-check-status[data-status="unverified"],
+.agent-crew-check-status[data-status="pending"] {
+  color: var(--warning, #a16207);
+}
+
+.agent-crew-check-status[data-status="failed"] {
+  color: var(--danger, #b91c1c);
+}

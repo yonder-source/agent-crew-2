@@ -9,6 +9,7 @@ import { IssueDiscovery } from "./discovery.js";
 import { GitHubIssueError, OctokitGitHubIssueProvider } from "./github-issues.js";
 import { GitHubAppClient, GitHubAppError } from "./github-app.js";
 import { cloneRepository } from "./repository-clone.js";
+import { validateCheckout, type ConnectionCheck } from "./repository-validation.js";
 
 const NAMESPACE = "agent-crew-job";
 const JOB_STATUSES = ["starting", "active", "completed", "needs-inspection", "retry-approved", "abandoned"] as const;
@@ -519,6 +520,40 @@ export default definePluginEntry({
         respond(true, { saved: true });
       } catch {
         respond(false, undefined, { code: "SETUP_DRAFT_SAVE_FAILED", message: "Setup draft could not be saved" });
+      }
+    }, { scope: "operator.admin" });
+
+    api.registerGatewayMethod("agent-crew.setup.validate", async ({ respond }) => {
+      try {
+        const store = api.runtime.state.openKeyedStoreV2<SetupDraft>({ namespace: "setup-draft", retention: "retained" });
+        const draft = parseSetupDraft(await store.lookup("current"));
+        const checks: ConnectionCheck[] = [];
+        try {
+          const access = await githubApp.repositoryAccess(draft.githubAppId, Number(draft.installationId), draft.repository);
+          checks.push({ id: "repository", status: "passed", message: "GitHub App credentials and repository read access verified." });
+          for (const [permission, required] of [["contents", "write"], ["issues", "write"], ["pull_requests", "write"]] as const) {
+            const granted = access.permissions[permission];
+            checks.push({
+              id: permission,
+              status: granted === undefined ? "unverified" : granted === required ? "passed" : "failed",
+              message: `${permission}: granted ${granted ?? "unknown"}; required ${required}. Actual writes have not been tested.`,
+            });
+          }
+        } catch (error) {
+          checks.push({ id: "repository", status: "failed", message: error instanceof GitHubAppError ? error.message : "Repository access validation failed." });
+        }
+        checks.push(await validateCheckout(draft.repository, draft.repositoryPath));
+        const roster: unknown = await call("agents.list", {});
+        const agents: unknown[] = isRecord(roster) && Array.isArray(roster.agents) ? roster.agents : [];
+        for (const [id, agentId] of [["coding-agent", draft.codingAgentId], ["designer-agent", draft.designerAgentId]] as const) {
+          if (id === "designer-agent" && agentId === "") continue;
+          const exists = agents.some((agent) => isRecord(agent) && agent.id === agentId);
+          checks.push({ id, status: exists ? "passed" : "failed", message: exists ? `Agent ${agentId} is configured.` : "Select an available agent." });
+        }
+        checks.push({ id: "writes", status: "unverified", message: "Push, issue writes and PR creation require separate live qualification." });
+        respond(true, { checks, valid: !checks.some((check) => check.status === "failed" || (check.status === "unverified" && check.id !== "writes")) });
+      } catch {
+        respond(false, undefined, { code: "SETUP_VALIDATION_FAILED", message: "Save a complete draft before validation; verify Gateway access." });
       }
     }, { scope: "operator.admin" });
 

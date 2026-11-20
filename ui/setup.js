@@ -84,16 +84,42 @@ function mount(container, { host, signal }) {
   const statusHeading = document.createElement("h2");
   statusHeading.textContent = "Connection status";
   status.append(statusHeading);
-  for (const label of ["GitHub App private key", "Repository access", "Repository source", "Slack credentials"]) {
-    const row = document.createElement("p");
-    row.textContent = `${label}: Not checked`;
-    status.append(row);
-  }
+  const validate = document.createElement("button");
+  validate.type = "button";
+  validate.textContent = "Validate saved connection";
+  const validationResults = document.createElement("div");
+  validationResults.setAttribute("role", "status");
+  validationResults.textContent = "Connection not validated.";
+  status.append(validate, validationResults);
   const hint = document.createElement("p");
-  hint.textContent = "Save keeps a draft. Apply requires connection validation.";
+  hint.textContent = "Save keeps a draft and validates it. Apply is not yet available.";
   status.append(hint);
   layout.append(form, status);
   container.replaceChildren(title, layout);
+
+  async function validateSavedConnection() {
+    validate.disabled = true;
+    validationResults.textContent = "Validating saved connection…";
+    try {
+      const result = await host.request("agent-crew.setup.validate", {});
+      if (signal.aborted) return;
+      validationResults.replaceChildren();
+      for (const check of result.checks) {
+        const row = document.createElement("p");
+        const label = document.createElement("strong");
+        label.className = "agent-crew-check-status";
+        label.dataset.status = check.status;
+        label.textContent = `${check.status.charAt(0).toUpperCase()}${check.status.slice(1)}`;
+        row.append(label, document.createTextNode(`: ${check.message}`));
+        validationResults.append(row);
+      }
+    } catch (error) {
+      if (!signal.aborted) validationResults.textContent = errorText(error, "Unable to validate the saved connection.");
+    } finally {
+      if (!signal.aborted) validate.disabled = false;
+    }
+  }
+  validate.addEventListener("click", () => { void validateSavedConnection(); });
 
   async function load() {
     try {
@@ -156,6 +182,7 @@ function mount(container, { host, signal }) {
       const draft = Object.fromEntries(fields.map(([name]) => [name, inputs.get(name).value]));
       await host.request("agent-crew.setup.draft.save", { draft });
       if (!signal.aborted) feedback.textContent = "Draft saved.";
+      await validateSavedConnection();
     } catch {
       if (!signal.aborted) feedback.textContent = "Unable to save draft.";
     } finally {
