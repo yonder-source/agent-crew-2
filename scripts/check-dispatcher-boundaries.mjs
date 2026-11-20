@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { assignedIssueFromSession, trustedSessionKey } from "../dist/assignment.js";
 import { createContext, runInContext } from "node:vm";
 import { IssueDiscovery } from "../dist/discovery.js";
+import { GitHubAppClient } from "../dist/github-app.js";
 
 const source = readFileSync(process.env.DISPATCHER_SOURCE ?? "dist/index.js", "utf8")
   .replace(/^import .*;\n/gm, "")
@@ -23,6 +24,7 @@ let issueToolFactory;
 const context = createContext({
   createHash, randomUUID, process: { env: { AGENT_CREW_GATEWAY_TOKEN: "test" } },
   assignedIssueFromSession, trustedSessionKey,
+  GitHubAppClient,
   Type: new Proxy({}, { get: () => () => ({}) }),
   GitHubIssueError: class GitHubIssueError extends Error {
     constructor(code, message) { super(message); this.code = code; }

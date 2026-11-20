@@ -7,6 +7,8 @@ import { assignedIssueFromSession, trustedSessionKey } from "./assignment.js";
 import { parseConfig } from "./config.mjs";
 import { IssueDiscovery } from "./discovery.js";
 import { GitHubIssueError, OctokitGitHubIssueProvider } from "./github-issues.js";
+import { GitHubAppClient, GitHubAppError } from "./github-app.js";
+import { cloneRepository } from "./repository-clone.js";
 
 const NAMESPACE = "agent-crew-job";
 const JOB_STATUSES = ["starting", "active", "completed", "needs-inspection", "retry-approved", "abandoned"] as const;
@@ -15,27 +17,32 @@ type JobStatus = typeof JOB_STATUSES[number];
 type WorkflowStatus = typeof WORKFLOW_STATUSES[number];
 const LOCKED = new Set(["starting", "active", "completed", "needs-inspection", "abandoned"]);
 const DRAFT_FIELDS = [
-  "githubAppId", "repository", "repositoryPath", "codingAgentId", "designerAgentId",
+  "githubAppId", "repository", "installationId", "repositoryPath", "codingAgentId", "designerAgentId",
   "codingChannelId", "designerChannelId", "codingUserIds", "designerUserIds", "tokenBudget",
 ] as const;
-type SetupDraft = Record<typeof DRAFT_FIELDS[number], string>;
+const DRAFT_FIELD_SET = new Set<string>(DRAFT_FIELDS);
+type SetupDraft = Omit<Record<typeof DRAFT_FIELDS[number], string>, "installationId"> & { installationId?: string };
 
 function parseSetupDraft(value: unknown): SetupDraft {
-  if (!isRecord(value) || Object.keys(value).length !== DRAFT_FIELDS.length) {
+  if (!isRecord(value) || Object.keys(value).some((key) => !DRAFT_FIELD_SET.has(key)) ||
+      Object.keys(value).length < DRAFT_FIELDS.length - 1 || Object.keys(value).length > DRAFT_FIELDS.length) {
     throw new Error("Invalid setup draft");
   }
   const { githubAppId, repository, repositoryPath, codingAgentId, designerAgentId,
     codingChannelId, designerChannelId, codingUserIds, designerUserIds, tokenBudget } = value;
-  if (typeof githubAppId !== "string" || typeof repository !== "string" ||
+  const installationId = Object.hasOwn(value, "installationId") ? value.installationId : "";
+  if (typeof githubAppId !== "string" || typeof repository !== "string" || typeof installationId !== "string" ||
       typeof repositoryPath !== "string" || typeof codingAgentId !== "string" ||
       typeof designerAgentId !== "string" || typeof codingChannelId !== "string" ||
       typeof designerChannelId !== "string" || typeof codingUserIds !== "string" ||
       typeof designerUserIds !== "string" || typeof tokenBudget !== "string" ||
-      DRAFT_FIELDS.some((field) => typeof value[field] !== "string" || value[field].length > 1024)) {
+      DRAFT_FIELDS.some((field) => (field !== "installationId" && typeof value[field] !== "string") ||
+        (typeof value[field] === "string" && value[field].length > 1024))) {
     throw new Error("Invalid setup draft");
   }
   return {
-    githubAppId, repository, repositoryPath, codingAgentId, designerAgentId,
+    githubAppId, repository, ...(Object.hasOwn(value, "installationId") ? { installationId } : {}),
+    repositoryPath, codingAgentId, designerAgentId,
     codingChannelId, designerChannelId, codingUserIds, designerUserIds, tokenBudget,
   };
 }
@@ -144,6 +151,9 @@ export default definePluginEntry({
     const bootId = randomUUID();
     let queue = Promise.resolve();
     let startingJobId: string | undefined;
+    let setupApplying = false;
+    let admissionEpoch = 0;
+    let discovery: IssueDiscovery | undefined;
     let issueUpdateQueue = Promise.resolve();
     let metadataQueue = Promise.resolve();
     const activeIssueUpdates = new Set<string>();
@@ -163,6 +173,9 @@ export default definePluginEntry({
     };
     const issueProvider = new OctokitGitHubIssueProvider({
       getInstallationToken: async () => readFile("/run/secrets/agent-crew-github-installation-token", "utf8"),
+    });
+    const githubApp = new GitHubAppClient({
+      readPrivateKey: async () => readFile("/run/secrets/agent-crew-github-app-private-key", "utf8"),
     });
     const describe = async (issue: Issue) => {
       const response: unknown = await call("sessions.describe", { key: issueSessionKey(issue) });
@@ -261,6 +274,51 @@ export default definePluginEntry({
       };
     };
 
+    const assertNoActiveCodingTasks = async (): Promise<void> => {
+      const response: unknown = await call("sessions.list", { archived: "all", limit: 5000 });
+      if (!isRecord(response) || !Array.isArray(response.sessions) || response.sessions.length >= 5000) {
+        throw new Error("Coding task inventory is incomplete; repository checkout is blocked.");
+      }
+      if (response.hasMore === true || (typeof response.nextOffset === "number" && response.nextOffset > 0) ||
+          (typeof response.totalCount === "number" && response.totalCount > response.sessions.length) ||
+          (typeof response.nextCursor === "string" && response.nextCursor !== "")) {
+        throw new Error("Coding task inventory is paginated; repository checkout is blocked.");
+      }
+      const rows = response.sessions.filter((value) => isRecord(value) && typeof value.key === "string" &&
+        /^agent:[a-z][a-z0-9_-]*:agent-crew-[a-f0-9]{32}$/.test(value.key));
+      for (const value of rows) {
+        if (!isRecord(value) || typeof value.key !== "string") {
+          throw new Error("Coding task inventory is invalid; repository checkout is blocked.");
+        }
+        const activeKnown = typeof value.hasActiveRun === "boolean" || Object.hasOwn(value, "activeRunId");
+        const activeRunIdValid = !Object.hasOwn(value, "activeRunId") || value.activeRunId === null ||
+          typeof value.activeRunId === "string";
+        const active = value.hasActiveRun === true || (typeof value.activeRunId === "string" && value.activeRunId !== "");
+        if (!activeKnown || !activeRunIdValid || active) {
+          throw new Error("An Agent Crew coding run is active or its stopped state cannot be confirmed.");
+        }
+        const described: unknown = await call("sessions.describe", { key: value.key });
+        if (!isRecord(described) || !isRecord(described.session)) {
+          throw new Error("A coding session could not be inspected; repository checkout is blocked.");
+        }
+        const extensions = described.session.pluginExtensions;
+        if (!Array.isArray(extensions)) throw new Error("Coding task state is unavailable; repository checkout is blocked.");
+        const entries: unknown[] = extensions;
+        const matches = entries.filter((item) => isRecord(item) &&
+          item.pluginId === "agent-crew" && item.namespace === NAMESPACE);
+        const match = matches[0];
+        const jobValue = isRecord(match) ? match.value : undefined;
+        if (matches.length !== 1 || !isJob(jobValue)) {
+          throw new Error("Coding task state is uncertain; repository checkout is blocked.");
+        }
+        const job = jobValue;
+        if (["starting", "active", "needs-inspection", "retry-approved"].includes(job.status) ||
+            (job.issueUpdate !== undefined && ["writing", "needs-inspection", "retry-approved", "abandoned"].includes(job.issueUpdate.status))) {
+          throw new Error("An Agent Crew coding task is active or uncertain; repository checkout is blocked.");
+        }
+      }
+    };
+
     const baseJob = (issue: Issue): Job => ({
       ...issue,
       jobId: randomUUID(),
@@ -270,7 +328,13 @@ export default definePluginEntry({
       updatedAt: new Date().toISOString(),
     });
 
-    const dispatchIssue = (issue: Issue): Promise<Job> => serialize(async () => {
+    const dispatchIssue = (issue: Issue): Promise<Job> => {
+      const requestedEpoch = admissionEpoch;
+      const admissionWasOpen = !setupApplying;
+      return serialize(async () => {
+      if (!admissionWasOpen || setupApplying || requestedEpoch !== admissionEpoch) {
+        throw new Error("Issue admission is paused while repository settings are being applied.");
+      }
       const session = describe(issue);
       const existing = await readJob(issue, session);
       if (existing && LOCKED.has(existing.status)) return existing;
@@ -403,7 +467,8 @@ export default definePluginEntry({
       } finally {
         startingJobId = undefined;
       }
-    });
+      });
+    };
 
     const statusTool = {
       name: "agent_crew_status",
@@ -454,6 +519,48 @@ export default definePluginEntry({
         respond(true, { saved: true });
       } catch {
         respond(false, undefined, { code: "SETUP_DRAFT_SAVE_FAILED", message: "Setup draft could not be saved" });
+      }
+    }, { scope: "operator.admin" });
+
+    api.registerGatewayMethod("agent-crew.setup.repositories.list", async ({ params, respond }) => {
+      try {
+        if (!isRecord(params)) throw new Error("Invalid repository discovery request");
+        const repositories = await githubApp.listAccessibleRepositories(params.appId);
+        respond(true, { repositories });
+      } catch (error) {
+        const code = error instanceof GitHubAppError ? error.code : "GITHUB_REPOSITORY_DISCOVERY_FAILED";
+        const message = error instanceof GitHubAppError ? error.message : "Repository discovery failed.";
+        respond(false, undefined, { code, message });
+      }
+    }, { scope: "operator.admin" });
+
+    api.registerGatewayMethod("agent-crew.setup.repository.clone", async ({ params, respond }) => {
+      if (setupApplying) {
+        respond(false, undefined, { code: "SETUP_APPLY_IN_PROGRESS", message: "Repository setup is already being applied." });
+        return;
+      }
+      setupApplying = true;
+      admissionEpoch += 1;
+      discovery?.pause();
+      try {
+        if (!isRecord(params)) throw new Error("Invalid repository clone request");
+        const { repository, installationId, repositoryPath } = params;
+        if (typeof repository !== "string" || typeof repositoryPath !== "string") {
+          throw new Error("Repository selection is invalid.");
+        }
+        const result = await serialize(async () => {
+          await assertNoActiveCodingTasks();
+          const token = await githubApp.installationTokenForRepository(params.appId, installationId, repository);
+          return cloneRepository({ repository, repositoryPath, token });
+        });
+        respond(true, result);
+      } catch (error) {
+        const code = error instanceof GitHubAppError ? error.code : "GITHUB_REPOSITORY_CLONE_FAILED";
+        const message = error instanceof Error ? error.message : "Repository clone failed.";
+        respond(false, undefined, { code, message });
+      } finally {
+        setupApplying = false;
+        discovery?.resume();
       }
     }, { scope: "operator.admin" });
 
@@ -521,7 +628,8 @@ export default definePluginEntry({
 
     if (config.github) {
       const repository = config.github.repository;
-      const discovery = new IssueDiscovery({
+      const pollIntervalMs = config.github.pollIntervalMs;
+      const issueDiscovery = new IssueDiscovery({
         repository,
         listReadyIssues: (configuredRepository) => issueProvider.listReadyIssues(configuredRepository),
         dispatch: (issue) => dispatchIssue(issue),
@@ -530,12 +638,13 @@ export default definePluginEntry({
           : `GitHub issue discovery completed; processed ${count} ready issue(s).`),
         onFailure: () => api.logger.error("GitHub issue discovery failed; no empty-result state was recorded."),
       });
+      discovery = issueDiscovery;
       let pollingTimer: ReturnType<typeof setInterval> | undefined;
       api.registerService({
         id: "agent-crew-github-discovery",
         start() {
-          void discovery.poll();
-          pollingTimer = setInterval(() => { void discovery.poll(); }, config.github!.pollIntervalMs);
+          void issueDiscovery.poll();
+          pollingTimer = setInterval(() => { void issueDiscovery.poll(); }, pollIntervalMs);
         },
         stop() {
           if (pollingTimer !== undefined) clearInterval(pollingTimer);

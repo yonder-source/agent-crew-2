@@ -56,7 +56,15 @@ agent-management UI are outside this package.
 
 ## 4.5.3 Validate access and apply changes
 
-**Work:** Before cloning, validate credential access to the selected repository
+**Work:** Discover installations and repositories through the configured GitHub
+App. Handle multiple installations and paginated repository lists; keep
+installation IDs in the saved draft and return repository names only to the UI.
+Use a narrowly scoped installation token to clone the selected repository into
+the configured local checkout. Keep the remote URL credential-free and deliver
+the token to Git through a short-lived, repository-scoped credential helper.
+Do not overwrite an unrelated existing checkout.
+
+Before cloning, validate credential access to the selected repository
 and inspect WBS3–5 permission grants. On Apply, check job state, stop automatic
 polling and block new task admission. Clone the repository source if absent; otherwise check the
 existing checkout. Verify that its remote corresponds to the selected repository
@@ -77,7 +85,11 @@ manually under the same checks, and show the polling state and any blocking reas
 Connection
 validation must not mutate repository content.
 
-**Done when:** The screen distinguishes invalid repository, missing credential,
+**Done when:** The screen loads accessible repositories from all App
+installations, including paginated results, and clones the selected repository
+without exposing a token or persisting it in Git configuration or the remote.
+An existing matching checkout is reported without recloning; a mismatched or
+non-Git path is left untouched. The screen distinguishes invalid repository, missing credential,
 inaccessible repository, checkout mismatch and insufficient or unverified
 permissions. Check the source checkout's Git remote against the selected
 repository. Show granted or insufficient Issues, Contents and Pull requests

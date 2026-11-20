@@ -114,6 +114,28 @@ Issues read/write permission. WBS3 checks use deterministic fixtures unless a
 disposable GitHub repository and installation token are supplied; fixture
 results are not live GitHub qualification.
 
+The repository setup page uses the same Compose overlay to mount the GitHub App
+private key from `.local/secrets/agent-crew.pem`. The Controller uses it only to
+discover installed repositories and issue a repository-scoped read token for
+cloning. The key and installation tokens never enter the UI.
+
+For repository setup before WBS3 token renewal is enabled, use
+`infra/local-dev/openclaw/compose.setup.yaml` instead of the GitHub overlay.
+It needs only `.local/secrets/agent-crew.pem`, and mounts the writable configuration
+directory `.local/gateway-config` at `/etc/agent-crew`. Initialize
+`.local/gateway-config/openclaw.json` from the existing Gateway configuration
+to preserve agent and model settings (or from root `openclaw.json` on a fresh
+installation). Then build and start with:
+
+```sh
+docker compose -f infra/local-dev/openclaw/compose.yaml -f infra/local-dev/openclaw/compose.setup.yaml up -d --build gateway
+```
+
+Save remains a pending draft; Apply is disabled until its later implementation.
+Native UI assets are snapshotted at Gateway startup and served under an
+immutable revision URL. After updating UI files, restart the Gateway to publish
+the new revision; copying files into a running container is insufficient.
+
 ## Local coding workflow
 
 The default Compose config stays credential-free for synthetic checks. To run
@@ -135,6 +157,6 @@ docker compose -f infra/local-dev/openclaw/compose.yaml -f infra/local-dev/openc
 ```
 
 The `coding` overlay mounts the local config read-only; `compose.github.yaml`
-mounts the token as a Gateway secret. Never put token values in the config
-file. Stop and remove the disposable runtime with the same Compose files and
-`down` when finished.
+mounts the installation token and App private key as Gateway secrets. Never put
+credential values in the config file. Stop and remove the disposable runtime
+with the same Compose files and `down` when finished.

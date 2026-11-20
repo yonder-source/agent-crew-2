@@ -30,7 +30,7 @@ COPY --chown=node:node ui ./dist/control-ui/agent-crew
 
 FROM build AS checks
 COPY --chown=node:node . ./
-CMD ["sh", "-c", "npm run lint && npm run check:lint && npm run typecheck && sh -n scripts/check-all.sh && node scripts/check-config.mjs && node scripts/check-dispatcher-boundaries.mjs && node scripts/check-coding-boundaries.mjs && node scripts/check-coding-result.mjs && node scripts/check-wbs3.mjs"]
+CMD ["sh", "-c", "npm run lint && npm run check:lint && npm run typecheck && sh -n scripts/check-all.sh && node scripts/check-config.mjs && node scripts/check-dispatcher-boundaries.mjs && node scripts/check-coding-boundaries.mjs && node scripts/check-coding-result.mjs && node scripts/check-wbs3.mjs && node scripts/check-repository-connection.mjs"]
 
 FROM base AS runtime
 USER root

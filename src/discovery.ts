@@ -10,14 +10,16 @@ export type IssueDiscoveryOptions = {
 
 export class IssueDiscovery {
   private running = false;
+  private paused = false;
 
   constructor(private readonly options: IssueDiscoveryOptions) {}
 
   async poll(): Promise<void> {
-    if (this.running) return;
+    if (this.running || this.paused) return;
     this.running = true;
     try {
       const issues = await this.options.listReadyIssues(this.options.repository);
+      if (this.paused) return;
       for (const issue of issues) {
         await this.options.dispatch({ repository: issue.repository, number: issue.number });
       }
@@ -27,5 +29,13 @@ export class IssueDiscovery {
     } finally {
       this.running = false;
     }
+  }
+
+  pause(): void {
+    this.paused = true;
+  }
+
+  resume(): void {
+    this.paused = false;
   }
 }

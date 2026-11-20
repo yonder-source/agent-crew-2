@@ -1,7 +1,8 @@
 const fields = [
   ["githubAppId", "GitHub App ID"],
   ["repository", "GitHub repository"],
-  ["repositoryPath", "Repository source path"],
+  ["installationId", "GitHub App installation"],
+  ["repositoryPath", "Repository checkout path"],
   ["codingAgentId", "Coding agent"],
   ["codingChannelId", "Coding Slack channel ID"],
   ["codingUserIds", "Coding authorized Slack user IDs"],
@@ -23,6 +24,10 @@ function mount(container, { host, signal }) {
   const inputs = new Map();
   const feedback = document.createElement("p");
   feedback.setAttribute("role", "status");
+  const errorText = (error, fallback) => error instanceof Error && error.message.length > 0
+    ? Array.from(error.message.slice(0, 240), (character) =>
+      character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127 ? " " : character).join("")
+    : fallback;
   const save = document.createElement("button");
   save.type = "submit";
   save.textContent = "Save";
@@ -32,22 +37,48 @@ function mount(container, { host, signal }) {
   apply.textContent = "Apply";
   apply.disabled = true;
   apply.title = "Connection validation is not yet available";
+  const discover = document.createElement("button");
+  discover.type = "button";
+  discover.textContent = "Load repositories";
+  const clone = document.createElement("button");
+  clone.type = "button";
+  clone.textContent = "Clone selected repository";
 
   for (const [name, label] of fields) {
+    if (name === "installationId") continue;
     const row = document.createElement("p");
     const caption = document.createElement("label");
     caption.textContent = label;
-    const input = name.endsWith("AgentId") ? document.createElement("select") : document.createElement("input");
+    caption.htmlFor = `agent-crew-${name}`;
+    const input = name.endsWith("AgentId") || name === "repository" ? document.createElement("select") : document.createElement("input");
     input.name = name;
+    input.id = `agent-crew-${name}`;
     input.maxLength = 1024;
-    caption.append(document.createElement("br"), input);
+    if (name === "repository") {
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = "Load repositories first";
+      input.append(option);
+    }
     row.append(caption);
+    if (name === "githubAppId") {
+      const controls = document.createElement("div");
+      controls.className = "agent-crew-app-controls";
+      controls.append(input, discover);
+      row.append(controls);
+    } else {
+      row.append(document.createElement("br"), input);
+    }
     form.append(row);
     inputs.set(name, input);
   }
+  const installationId = document.createElement("input");
+  installationId.type = "hidden";
+  installationId.name = "installationId";
+  inputs.set("installationId", installationId);
   const actions = document.createElement("div");
   actions.className = "agent-crew-actions";
-  actions.append(save, apply);
+  actions.append(save, apply, clone);
   form.append(actions, feedback);
   const status = document.createElement("aside");
   const statusHeading = document.createElement("h2");
@@ -100,6 +131,14 @@ function mount(container, { host, signal }) {
           }
           input.value = value;
         }
+        installationId.value = typeof values.installationId === "string" ? values.installationId : "";
+        if (values.repository) {
+          const unavailable = document.createElement("option");
+          unavailable.value = values.repository;
+          unavailable.textContent = `${values.repository} (load repository list to refresh)`;
+          inputs.get("repository").append(unavailable);
+          inputs.get("repository").value = values.repository;
+        }
       }
       if (!values?.codingAgentId && agents.some((agent) => agent?.id === "coding")) {
         inputs.get("codingAgentId").value = "coding";
@@ -121,6 +160,78 @@ function mount(container, { host, signal }) {
       if (!signal.aborted) feedback.textContent = "Unable to save draft.";
     } finally {
       if (!signal.aborted) save.disabled = false;
+    }
+  });
+  discover.addEventListener("click", async () => {
+    discover.disabled = true;
+    feedback.textContent = "Loading GitHub repositories…";
+    try {
+      const result = await host.request("agent-crew.setup.repositories.list", {
+        appId: inputs.get("githubAppId").value,
+      });
+      if (signal.aborted) return;
+      const select = inputs.get("repository");
+      const previousRepository = select.value;
+      const previousInstallation = installationId.value;
+      select.replaceChildren();
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = result.repositories.length ? "Select a repository" : "No accessible repositories";
+      select.append(placeholder);
+      for (const item of result.repositories) {
+        if (typeof item?.repository !== "string" || !Number.isSafeInteger(item.installationId) ||
+            typeof item.installationAccount !== "string") continue;
+        const option = document.createElement("option");
+        option.value = item.repository;
+        option.dataset.installationId = String(item.installationId);
+        option.textContent = `${item.repository} (${item.installationAccount})`;
+        select.append(option);
+      }
+      const existing = [...select.options].find((option) => option.value === previousRepository &&
+        option.dataset.installationId === previousInstallation);
+      if (existing) select.selectedIndex = [...select.options].indexOf(existing);
+      if (!existing && select.options.length > 1) select.selectedIndex = 1;
+      installationId.value = select.selectedOptions[0]?.dataset.installationId ?? "";
+      if (select.value) {
+        const [owner, repo] = select.value.split("/");
+        inputs.get("repositoryPath").value = `/workspaces/repositories/${owner}/${repo}`;
+      }
+      feedback.textContent = result.repositories.length
+        ? `Loaded ${result.repositories.length} accessible repositories.`
+        : "This GitHub App has no accessible repositories.";
+    } catch (error) {
+      if (!signal.aborted) feedback.textContent = errorText(error,
+        "Unable to load repositories. Check the App ID, private key and installation permissions.");
+    } finally {
+      if (!signal.aborted) discover.disabled = false;
+    }
+  });
+  inputs.get("repository").addEventListener("change", () => {
+    const selected = inputs.get("repository").selectedOptions[0];
+    installationId.value = selected?.dataset.installationId ?? "";
+    if (inputs.get("repository").value) {
+      const [owner, repo] = inputs.get("repository").value.split("/");
+      inputs.get("repositoryPath").value = `/workspaces/repositories/${owner}/${repo}`;
+    }
+  });
+  clone.addEventListener("click", async () => {
+    clone.disabled = true;
+    feedback.textContent = "Cloning repository…";
+    try {
+      const result = await host.request("agent-crew.setup.repository.clone", {
+        appId: inputs.get("githubAppId").value,
+        repository: inputs.get("repository").value,
+        installationId: Number(installationId.value),
+        repositoryPath: inputs.get("repositoryPath").value,
+      });
+      if (!signal.aborted) feedback.textContent = result.status === "cloned"
+        ? `Repository cloned to ${result.repositoryPath}.`
+        : `Matching checkout already exists at ${result.repositoryPath}.`;
+    } catch (error) {
+      if (!signal.aborted) feedback.textContent = errorText(error,
+        "Clone failed. Check repository permissions, path and existing checkout.");
+    } finally {
+      if (!signal.aborted) clone.disabled = false;
     }
   });
   void load();

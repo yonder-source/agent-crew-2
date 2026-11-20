@@ -54,6 +54,7 @@ export default defineConfig([
     ["scripts/check-gateway.mjs", "spawnSync"],
     ["scripts/session-roundtrip.mjs", "spawnSync"],
     ["scripts/check-dispatcher.mjs", "execFile"],
+    ["scripts/check-repository-connection.mjs", "spawnSync"],
   ].map(([file, allowed]) => ({
     files: [file],
     rules: {
@@ -87,6 +88,24 @@ export default defineConfig([
     rules: {
       "no-restricted-imports": ["error", {
         paths: [...restrictedModules, ...moduleLoaders],
+        patterns: [privateSdk, {
+          regex: "(^|/)(docs|test|tests|scripts)(/|$)",
+          message: "Production code must not import tests, scripts or historical evidence.",
+        }],
+      }],
+    },
+  },
+  {
+    // Repository cloning invokes Git with fixed argument arrays and no shell option.
+    files: ["src/repository-clone.ts"],
+    rules: {
+      "no-restricted-imports": ["error", {
+        paths: [
+          ...processLoaders, "vm", "node:vm", ...moduleLoaders,
+          ...["child_process", "node:child_process"].map((name) => ({
+            name, allowImportNames: ["execFile"], message: "Only execFile is approved for repository Git operations.",
+          })),
+        ],
         patterns: [privateSdk, {
           regex: "(^|/)(docs|test|tests|scripts)(/|$)",
           message: "Production code must not import tests, scripts or historical evidence.",

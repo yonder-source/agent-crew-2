@@ -3,6 +3,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createContext, runInContext } from "node:vm";
 import { assignedIssueFromSession, trustedSessionKey } from "../dist/assignment.js";
+import { GitHubAppError } from "../dist/github-app.js";
+import { IssueDiscovery } from "../dist/discovery.js";
 
 const source = readFileSync("dist/index.js", "utf8")
   .replace(/^import .*;\n/gm, "")
@@ -16,6 +18,7 @@ function harness(initialSession = null) {
   let session = initialSession;
   let codingStatus = "ok";
   let codingText = "Changed README; validation passed";
+  let inventory = { sessions: [] };
   const calls = [];
   const methods = new Map();
   const registeredTools = new Map();
@@ -23,6 +26,9 @@ function harness(initialSession = null) {
     createHash, randomUUID,
     process: { env: { AGENT_CREW_GATEWAY_TOKEN: "test" } },
     assignedIssueFromSession, trustedSessionKey,
+    GitHubAppError,
+    GitHubAppClient: class { async installationTokenForRepository() { return "fixture-token"; } },
+    cloneRepository: async (options) => { calls.push({ method: "clone", params: options }); return { status: "cloned" }; },
     Type: new Proxy({}, { get: () => () => ({}) }),
     GitHubIssueError: class GitHubIssueError extends Error {},
     OctokitGitHubIssueProvider: class {
@@ -30,7 +36,7 @@ function harness(initialSession = null) {
         return { repository, number, title: "Fixture", body: "Change README", state: "open", labels: ["ready for agent"] };
       }
     },
-    IssueDiscovery: class {},
+    IssueDiscovery,
     parseConfig: () => ({
       environment: "test", github: { repository: "owner/repo", pollIntervalMs: 60_000 },
       coding: { agentId: "coding", repositoryPath },
@@ -38,6 +44,7 @@ function harness(initialSession = null) {
     definePluginEntry: (entry) => entry,
     callGatewayFromCli: async (method, _options, params) => {
       calls.push({ method, params });
+      if (method === "sessions.list") return inventory;
       if (method === "sessions.describe") return { session };
       if (method === "sessions.create") {
         session = {
@@ -78,6 +85,7 @@ function harness(initialSession = null) {
   }
   return {
     calls,
+    setInventory(value) { inventory = value; },
     method,
     async status() {
       return registeredTools.get("agent_crew_status").execute("fixture", {
@@ -140,4 +148,20 @@ assert.equal(resumed.value.job.status, "completed");
 assert.equal(orphan.calls.filter((call) => call.method === "sessions.create").length, 0);
 assert.equal(orphan.calls.filter((call) => call.method === "tools.invoke").length, 1);
 
-console.log("Coding dispatch boundary fixtures passed: target, result status, orphan inspection and explicit retry.");
+const setup = harness();
+const cloneParams = { appId: "123", installationId: 17, repository: "owner/repo", repositoryPath };
+assert.equal((await setup.method("agent-crew.setup.repository.clone", cloneParams)).ok, true);
+const cloneCount = () => setup.calls.filter(call => call.method === "clone").length;
+assert.equal(cloneCount(), 1);
+for (const inventory of [
+  { sessions: [], hasMore: true },
+  { sessions: [{ key: "agent:coding:agent-crew-" + "a".repeat(32), hasActiveRun: true }] },
+  { sessions: [{ key: "agent:coding:agent-crew-" + "a".repeat(32) }] },
+]) {
+  setup.setInventory(inventory);
+  assert.equal((await setup.method("agent-crew.setup.repository.clone", cloneParams)).ok, false);
+  assert.equal(cloneCount(), 1, "Unsafe inventory must block clone before credential issuance");
+}
+setup.setInventory({ sessions: [] });
+assert.equal((await setup.method("agent-crew.setup.repository.clone", cloneParams)).ok, true);
+console.log("Coding dispatch and setup admission boundary fixtures passed.");

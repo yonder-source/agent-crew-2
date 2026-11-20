@@ -11,3 +11,5 @@ node_modules/
 .local/worktrees/
 .local/worktree-projections/
 .local/sandbox/
+.local/gateway-config/
+.local/deployment-backups/
