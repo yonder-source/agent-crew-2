@@ -125,6 +125,21 @@ failures without exposing secrets. Exercise expiry, renewal and failure behavior
 and record live GitHub evidence separately from fixtures. Document the App
 setup prerequisite and the secret delivery and rotation responsibilities.
 
+## Small batch delivery contracts
+
+- **Batch 2 supplement:** Define `openclaw/agent-crew-issue-<number>` from updated remote main,
+  persist the exact base SHA, and reject an existing branch for a new task.
+  A bound task resumes its recorded worktree without updating its base.
+- **Batch 3:** Implement authenticated main update, exact-base worktree creation
+  and retained job/session/issue/repository/worktree/branch/base binding. Stop on
+  dirty checkout, missing main, divergence, branch collision or uncertain setup.
+  Use the native `openclaw/agent-crew-issue-<number>` branch naming; keep
+  OpenClaw managed metadata intact.
+- **Batch 6 supplement:** Require local commits and structured validation records
+  (command, outcome, exit code when available, summary). The Controller verifies
+  the assigned branch and head SHA and persists delivery status. WBS5 reads the
+  binding from trusted state and independently verifies publication conditions.
+
 ## 4.5.5 Acceptance and handoff
 
 **Skills:** Make the skills under the host's `.local/skills` available read-only
@@ -189,7 +204,7 @@ changes, credential redaction, pending saves, job-related apply restrictions and
 operator-forced restart, including uncertain job state across restart. Verify repository read access and
 record write capabilities that remain unverified. Exercise the selected token
 issuance and renewal path. Before each new task, have the Controller update the
-source checkout from remote `main` and create its `feat/` branch and worktree
+source checkout from remote `main` and create its `openclaw/agent-crew-issue-<number>` branch and worktree
 from that base. Stop with a clear reason for dirty source, divergent `main`,
 missing remote `main`, or update failure; do not overwrite or automatically merge.
 Exercise polling stop, safe automatic restart and manual restart, including health

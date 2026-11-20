@@ -261,10 +261,19 @@ as Lobster workflow arguments to `openclaw.agent`, and re-read the issue before
 starting to ensure it remains open and labeled `ready for agent`.
 
 Before each new task, the Controller updates the source checkout from remote
-`main` and creates the task's `feat/` branch and worktree from that updated base.
+`main` and creates `openclaw/agent-crew-issue-<number>` and its worktree
+from the exact updated base commit. Record that base SHA in the Controller-owned task binding. An
+existing branch blocks a new task and requires inspection; resuming an already
+bound task reuses its recorded branch and base without pulling or recreating it.
 Stop and report the reason if the checkout is dirty, local and remote `main`
 have diverged, remote `main` is missing, or the update fails; never overwrite
 local changes or automatically merge divergent histories.
+Bind the job, session, issue, repository, worktree, branch and base commit in
+retained Controller state. Small batch 6 adds local committed deliverables,
+structured validation evidence and a Controller-verified head SHA. WBS5 obtains
+these values from that state and independently checks publication eligibility;
+agent-supplied validation is evidence, not publication authorization.
+
 Qualify this behavior together with Git operations and isolation inside the
 coding sandbox through the WBS4.5 integration check.
 
