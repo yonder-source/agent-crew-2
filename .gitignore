@@ -5,6 +5,7 @@ node_modules/
 .local/openclaw-coding.json
 .local/openclaw-state/
 .local/repositories/
+.local/skills/
 
 .local/worktrees/
 .local/worktree-projections/
