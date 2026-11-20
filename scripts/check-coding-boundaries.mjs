@@ -5,6 +5,7 @@ import { createContext, runInContext } from "node:vm";
 import { assignedIssueFromSession, trustedSessionKey } from "../dist/assignment.js";
 import { GitHubAppError } from "../dist/github-app.js";
 import { IssueDiscovery } from "../dist/discovery.js";
+import { connectionConfig } from "../dist/setup-config.js";
 
 const source = readFileSync("dist/index.js", "utf8")
   .replace(/^import .*;\n/gm, "")
@@ -18,7 +19,10 @@ function harness(initialSession = null) {
   let session = initialSession;
   let codingStatus = "ok";
   let codingText = "Changed README; validation passed";
+  let failConfigPatch = false;
   let inventory = { sessions: [] };
+  const setupDraft = { githubAppId: "123", repository: "owner/repo", installationId: "17", repositoryPath,
+    codingAgentId: "coding", designerAgentId: "", codingChannelId: "", designerChannelId: "", codingUserIds: "", designerUserIds: "", tokenBudget: "" };
   const calls = [];
   const methods = new Map();
   const registeredTools = new Map();
@@ -26,8 +30,13 @@ function harness(initialSession = null) {
     createHash, randomUUID,
     process: { env: { AGENT_CREW_GATEWAY_TOKEN: "test" } },
     assignedIssueFromSession, trustedSessionKey,
+    connectionConfig,
     GitHubAppError,
-    GitHubAppClient: class { async installationTokenForRepository() { return "fixture-token"; } },
+    GitHubAppClient: class {
+      async installationTokenForRepository() { return "fixture-token"; }
+      async repositoryAccess() { return { permissions: { contents: "write", issues: "write", pull_requests: "write" } }; }
+    },
+    validateCheckout: async () => ({ id: "checkout", status: "passed", message: "Fixture remote matches" }),
     cloneRepository: async (options) => { calls.push({ method: "clone", params: options }); return { status: "cloned" }; },
     Type: new Proxy({}, { get: () => () => ({}) }),
     GitHubIssueError: class GitHubIssueError extends Error {},
@@ -45,6 +54,16 @@ function harness(initialSession = null) {
     callGatewayFromCli: async (method, _options, params) => {
       calls.push({ method, params });
       if (method === "sessions.list") return inventory;
+      if (method === "agents.list") return { agents: [{ id: "coding" }] };
+      if (method === "config.get") return { hash: "fixture-revision", config: {
+        agents: { entries: { coding: { model: "fixture-model" } } },
+        gateway: { auth: { token: "__OPENCLAW_REDACTED__" } },
+        plugins: { allow: ["agent-crew", "fixture-plugin"], entries: { "agent-crew": { config: { environment: "test" } }, "fixture-plugin": { enabled: true } } },
+      } };
+      if (method === "config.set") {
+        if (failConfigPatch) throw new Error("Simulated config commit transport failure");
+        return { ok: true };
+      }
       if (method === "sessions.describe") return { session };
       if (method === "sessions.create") {
         session = {
@@ -69,6 +88,7 @@ function harness(initialSession = null) {
   });
   runInContext(source, context);
   context.entry.register({
+    runtime: { state: { openKeyedStoreV2: () => ({ lookup: async () => setupDraft }) } },
     session: { state: { registerSessionExtension() {} } },
     registerTool: (tool) => registeredTools.set(tool.name, tool),
     registerGatewayMethod: (name, handler, options) => methods.set(name, { handler, options }),
@@ -86,6 +106,7 @@ function harness(initialSession = null) {
   return {
     calls,
     setInventory(value) { inventory = value; },
+    failConfigPatch() { failConfigPatch = true; },
     method,
     async status() {
       return registeredTools.get("agent_crew_status").execute("fixture", {
@@ -151,6 +172,34 @@ assert.equal(orphan.calls.filter((call) => call.method === "tools.invoke").lengt
 const setup = harness();
 const cloneParams = { appId: "123", installationId: 17, repository: "owner/repo", repositoryPath };
 assert.equal((await setup.method("agent-crew.setup.repository.clone", cloneParams)).ok, true);
+const applied = harness();
+const validated = await applied.method("agent-crew.setup.validate", {});
+assert.equal((await applied.method("agent-crew.setup.apply", { draftHash: validated.value.draftHash })).ok, true);
+const configWrite = applied.calls.find(call => call.method === "config.set");
+assert.equal(configWrite.params.baseHash, "fixture-revision");
+const patchedConnection = JSON.parse(configWrite.params.raw).plugins.entries["agent-crew"].config;
+assert.equal(patchedConnection.github.installationId, 17);
+assert.equal(patchedConnection.coding.repositoryPath, repositoryPath);
+const replacement = JSON.parse(configWrite.params.raw);
+assert.equal(replacement.agents.entries.coding.model, "fixture-model");
+assert.equal(replacement.gateway.auth.token, "__OPENCLAW_REDACTED__");
+assert.deepEqual(replacement.plugins.allow, ["agent-crew", "fixture-plugin"]);
+assert.equal(replacement.plugins.entries["fixture-plugin"].enabled, true);
+const activeApply = harness();
+activeApply.setInventory({ sessions: [{ key: "agent:coding:agent-crew-" + "a".repeat(32), hasActiveRun: true }] });
+assert.equal((await activeApply.method("agent-crew.setup.apply", {})).ok, false);
+assert.equal(activeApply.calls.some(call => call.method === "clone" || call.method === "config.set"), false);
+const uncertainApply = harness();
+uncertainApply.failConfigPatch();
+const uncertainValidation = await uncertainApply.method("agent-crew.setup.validate", {});
+assert.equal((await uncertainApply.method("agent-crew.setup.apply", { draftHash: uncertainValidation.value.draftHash })).ok, false);
+const uncertainPolling = await uncertainApply.method("agent-crew.setup.polling.status", {});
+assert.equal(uncertainPolling.value.running, false);
+assert.match(uncertainPolling.value.reason, /inspection/);
+assert.equal((await uncertainApply.method("agent-crew.setup.polling.resume", {})).ok, true);
+const changedDraft = harness();
+assert.equal((await changedDraft.method("agent-crew.setup.apply", { draftHash: "outdated" })).ok, false);
+assert.equal(changedDraft.calls.some(call => call.method === "config.set" || call.method === "clone"), false);
 const cloneCount = () => setup.calls.filter(call => call.method === "clone").length;
 assert.equal(cloneCount(), 1);
 for (const inventory of [

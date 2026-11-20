@@ -131,7 +131,16 @@ installation). Then build and start with:
 docker compose -f infra/local-dev/openclaw/compose.yaml -f infra/local-dev/openclaw/compose.setup.yaml up -d --build gateway
 ```
 
-Save remains a pending draft; Apply is disabled until its later implementation.
+Save retains and validates a pending draft. Apply checks active/uncertain work,
+pauses admission and scheduling, prepares the checkout, then saves the
+revision-checked native configuration while preserving other settings. Saving
+and runtime activation are reported separately; the native reloader activates
+the connection after the Apply request finishes. Runtime activation resumes scheduling only after connection and task-state
+checks. Resume scheduling repeats those checks manually. An unacknowledged
+configuration write requires inspection before retrying or resuming.
+App-based issue operations obtain fresh, repository-scoped Issues-write tokens
+from the PEM; the legacy installation-token file is used only by configurations
+without an App ID. Tokens are never delivered to coding agents.
 Native UI assets are snapshotted at Gateway startup and served under an
 immutable revision URL. After updating UI files, restart the Gateway to publish
 the new revision; copying files into a running container is insufficient.

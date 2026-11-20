@@ -61,6 +61,8 @@ then configure its matching checkout and the existing coding agent ID setting.
 Pre-fill the repository source path and offer configured agents in a dropdown,
 defaulting to `coding` when available. Show individual validation results and
 failures alongside connection status, and save feedback near the save action.
+Apply owns checkout creation; do not expose a separate clone action in the
+operator form. A saved draft must pass validation before Apply is enabled.
 Compare the source checkout's Git remote with the selected repository; distinguish
 granted App permissions from confirmed write outcomes. Authenticated
 operator authorization is required for reads, validation and changes; assigned
@@ -84,8 +86,12 @@ Repository read access is distinct from push, issue-write and PR capabilities;
 report unverified write capabilities until live write qualification. WBS4.5
 also plans and delivers GitHub App installation token issuance and renewal for
 unattended operation. Keep App credentials with the Controller in the existing
-secret delivery mechanism, and never expose secret values to the UI or coding
-agents. Qualify the issuance and renewal mechanism, expiry and failure handling,
+secret delivery mechanism. For the single-user implementation, issue operations
+obtain a fresh repository-scoped Issues-write token per operation rather than
+keeping a cached installation token through expiry. Legacy configurations may
+continue using the pre-provisioned installation-token secret. Keep credentials
+and tokens out of coding-agent context and UI responses.
+Qualify the issuance and renewal mechanism, expiry and failure handling,
 and repository-scoped permissions before selecting its implementation. Reuse
 supported OpenClaw UI/configuration facilities; qualify the pinned runtime's
 extension support before choosing the integration. WBS4.5 validates the UI,

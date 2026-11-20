@@ -36,13 +36,10 @@ function mount(container, { host, signal }) {
   apply.type = "button";
   apply.textContent = "Apply";
   apply.disabled = true;
-  apply.title = "Connection validation is not yet available";
+  apply.title = "Validate the saved connection before applying";
   const discover = document.createElement("button");
   discover.type = "button";
   discover.textContent = "Load repositories";
-  const clone = document.createElement("button");
-  clone.type = "button";
-  clone.textContent = "Clone selected repository";
 
   for (const [name, label] of fields) {
     if (name === "installationId") continue;
@@ -78,7 +75,7 @@ function mount(container, { host, signal }) {
   inputs.set("installationId", installationId);
   const actions = document.createElement("div");
   actions.className = "agent-crew-actions";
-  actions.append(save, apply, clone);
+  actions.append(save, apply);
   form.append(actions, feedback);
   const status = document.createElement("aside");
   const statusHeading = document.createElement("h2");
@@ -91,13 +88,42 @@ function mount(container, { host, signal }) {
   validationResults.setAttribute("role", "status");
   validationResults.textContent = "Connection not validated.";
   status.append(validate, validationResults);
+  const resume = document.createElement("button");
+  resume.type = "button";
+  resume.textContent = "Resume scheduling";
+  const pollingStatus = document.createElement("p");
+  status.append(resume, pollingStatus);
   const hint = document.createElement("p");
-  hint.textContent = "Save keeps a draft and validates it. Apply is not yet available.";
+  hint.textContent = "Save validates a draft. Apply prepares the checkout and starts automatic scheduling; active or uncertain tasks block it.";
   status.append(hint);
   layout.append(form, status);
   container.replaceChildren(title, layout);
+  let savedFields = "";
+  let validatedDraftHash = "";
+  const formFields = () => Object.fromEntries(fields.map(([name]) => [name, inputs.get(name).value]));
+  form.addEventListener("input", () => { apply.disabled = true; });
+  const refreshPolling = async () => {
+    try {
+      const result = await host.request("agent-crew.setup.polling.status", {});
+      if (!signal.aborted) pollingStatus.textContent = result.running ? "Scheduling: Running" : `Scheduling: Paused — ${result.reason}`;
+    } catch {
+      if (!signal.aborted) pollingStatus.textContent = "Scheduling status unavailable; reconnect after any Gateway restart.";
+    }
+  };
+  resume.addEventListener("click", async () => {
+    resume.disabled = true;
+    try {
+      await host.request("agent-crew.setup.polling.resume", {});
+    } catch (error) {
+      if (!signal.aborted) feedback.textContent = errorText(error, "Scheduling could not resume.");
+    } finally {
+      if (!signal.aborted) resume.disabled = false;
+      await refreshPolling();
+    }
+  });
 
   async function validateSavedConnection() {
+    apply.disabled = true;
     validate.disabled = true;
     validationResults.textContent = "Validating saved connection…";
     try {
@@ -113,6 +139,8 @@ function mount(container, { host, signal }) {
         row.append(label, document.createTextNode(`: ${check.message}`));
         validationResults.append(row);
       }
+      validatedDraftHash = typeof result.draftHash === "string" ? result.draftHash : "";
+      apply.disabled = !result.valid || !validatedDraftHash || JSON.stringify(formFields()) !== savedFields;
     } catch (error) {
       if (!signal.aborted) validationResults.textContent = errorText(error, "Unable to validate the saved connection.");
     } finally {
@@ -166,10 +194,12 @@ function mount(container, { host, signal }) {
           inputs.get("repository").value = values.repository;
         }
       }
+      if (saved?.draft) savedFields = JSON.stringify(formFields());
       if (!values?.codingAgentId && agents.some((agent) => agent?.id === "coding")) {
         inputs.get("codingAgentId").value = "coding";
       }
       save.disabled = false;
+      await refreshPolling();
     } catch {
       if (!signal.aborted) feedback.textContent = "Unable to load setup or agents.";
     }
@@ -179,8 +209,9 @@ function mount(container, { host, signal }) {
     event.preventDefault();
     save.disabled = true;
     try {
-      const draft = Object.fromEntries(fields.map(([name]) => [name, inputs.get(name).value]));
+      const draft = formFields();
       await host.request("agent-crew.setup.draft.save", { draft });
+      savedFields = JSON.stringify(draft);
       if (!signal.aborted) feedback.textContent = "Draft saved.";
       await validateSavedConnection();
     } catch {
@@ -190,6 +221,7 @@ function mount(container, { host, signal }) {
     }
   });
   discover.addEventListener("click", async () => {
+    apply.disabled = true;
     discover.disabled = true;
     feedback.textContent = "Loading GitHub repositories…";
     try {
@@ -234,6 +266,7 @@ function mount(container, { host, signal }) {
     }
   });
   inputs.get("repository").addEventListener("change", () => {
+    apply.disabled = true;
     const selected = inputs.get("repository").selectedOptions[0];
     installationId.value = selected?.dataset.installationId ?? "";
     if (inputs.get("repository").value) {
@@ -241,28 +274,23 @@ function mount(container, { host, signal }) {
       inputs.get("repositoryPath").value = `/workspaces/repositories/${owner}/${repo}`;
     }
   });
-  clone.addEventListener("click", async () => {
-    clone.disabled = true;
-    feedback.textContent = "Cloning repository…";
+  apply.addEventListener("click", async () => {
+    apply.disabled = true;
+    feedback.textContent = "Applying saved connection…";
     try {
-      const result = await host.request("agent-crew.setup.repository.clone", {
-        appId: inputs.get("githubAppId").value,
-        repository: inputs.get("repository").value,
-        installationId: Number(installationId.value),
-        repositoryPath: inputs.get("repositoryPath").value,
-      });
-      if (!signal.aborted) feedback.textContent = result.status === "cloned"
-        ? `Repository cloned to ${result.repositoryPath}.`
-        : `Matching checkout already exists at ${result.repositoryPath}.`;
+      const result = await host.request("agent-crew.setup.apply", { draftHash: validatedDraftHash });
+      if (!signal.aborted) feedback.textContent = result.message;
     } catch (error) {
       if (!signal.aborted) feedback.textContent = errorText(error,
-        "Clone failed. Check repository permissions, path and existing checkout.");
+        "Apply was not acknowledged. Check Gateway settings and active tasks before retrying.");
     } finally {
-      if (!signal.aborted) clone.disabled = false;
+      await refreshPolling();
     }
   });
   void load();
-  return { dispose: () => container.replaceChildren() };
+  const pollingTimer = setInterval(() => { void refreshPolling(); }, 5000);
+  signal.addEventListener("abort", () => clearInterval(pollingTimer), { once: true });
+  return { dispose: () => { clearInterval(pollingTimer); container.replaceChildren(); } };
 }
 
 export default {

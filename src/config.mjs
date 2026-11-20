@@ -20,6 +20,13 @@ export function parseConfig(value) {
     throw new Error("Agent Crew GitHub configuration is invalid.");
   }
   const result = { ...config, github: { repository: repository.toLowerCase(), pollIntervalMs } };
+  if (github.appId !== undefined || github.installationId !== undefined) {
+    if (typeof github.appId !== "string" || !/^[1-9][0-9]{0,15}$/.test(github.appId) ||
+        typeof github.installationId !== "number" || !Number.isSafeInteger(github.installationId) || github.installationId < 1) {
+      throw new Error("GitHub App ID and installation ID must be configured together.");
+    }
+    result.github = { ...result.github, appId: github.appId, installationId: github.installationId };
+  }
   if (value.coding !== undefined) {
     const coding = value.coding;
     if (typeof coding !== "object" || coding === null || Array.isArray(coding)) {

@@ -21,6 +21,8 @@
         "required": ["repository"],
         "properties": {
           "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+          "appId": { "type": "string", "pattern": "^[1-9][0-9]{0,15}$" },
+          "installationId": { "type": "integer", "minimum": 1 },
           "pollIntervalMs": { "type": "integer", "minimum": 10000, "maximum": 3600000 }
         }
       },

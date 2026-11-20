@@ -205,3 +205,47 @@ active runs. The served asset contains the validation control; the user's
 existing saved draft passed repository read, granted permissions, checkout
 remote, coding and designer agent checks. Actual write operations remain
 explicitly unverified. Gateway health passed after deployment.
+
+## Repository Apply and scheduling — 2026-11-20
+
+Apply verifies the saved-draft hash, blocks immediately during dispatch, checks
+retained active/uncertain tasks, validates the draft and prepares its checkout.
+It uses a revision-checked native configuration write that preserves other
+plugins, agent/model settings, redacted secret placeholders and polling interval.
+The native configuration service restores secrets and owns atomic persistence.
+
+Live qualification found a self-reload dependency with `config.patch`: Gateway
+waits for Apply to finish before replacing the plugin, while Apply waits for
+replacement acknowledgment. The final flow uses persistence-only `config.set`,
+reports saved/pending activation, then lets native reload proceed after the RPC
+returns. Old-instance scheduling stays blocked. If reload is disabled or remains
+pending, Gateway must be restarted. Unacknowledged writes remain paused for
+inspection and are never retried automatically.
+
+App-mode startup checks checkout, repository access and retained tasks before
+resuming scheduling. Transient reload failures retry at the polling interval;
+Resume scheduling repeats the guards explicitly. UI status refreshes every five
+seconds. Apply replaces the clone button. App-mode issue operations obtain a
+fresh repository-scoped Issues-write token per operation; legacy token-file
+configurations remain supported. Credential failure never retries a write.
+
+Pinned checks pass Apply, in-flight dispatch rejection, active-task blocking,
+stale-draft rejection, revision propagation, unrelated-config preservation,
+unacknowledged-write pause and explicit resume fixtures. Credential fixtures
+verify fresh Issues tokens request no Contents grant. A network-isolated native
+Gateway verified admin scopes, native stale-revision rejection, reload and safe
+paused scheduling with a missing checkout.
+
+Live App credentials read zero ready issues from `yonder-source/n8n-nodes-qrcode`.
+A disposable Gateway validated and cloned it, acknowledged the real Apply RPC
+within five seconds, hot-reloaded the connection and automatically completed an
+empty discovery at the next polling interval. Explicit resume also passed.
+The plugin-replacement window briefly returned UNAVAILABLE for a status read;
+subsequent reads recovered. No coding session or GitHub write was performed.
+Chromium with fixture RPCs separately verified Save/validation/Apply gating and
+feedback; these UI fixtures are not browser-to-GitHub acceptance.
+
+Deployed to persistent local Claw after confirming zero active runs. Gateway
+health and served Apply assets passed. The operator's saved draft is retained;
+the active repository remains empty and scheduling stays paused until the
+operator applies that draft. No real task connection was activated by deployment.

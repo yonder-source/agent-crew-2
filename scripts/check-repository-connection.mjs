@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { GitHubAppClient } from "../dist/github-app.js";
 import { cloneRepository } from "../dist/repository-clone.js";
 import { validateCheckout } from "../dist/repository-validation.js";
+import { parseConfig } from "../dist/config.mjs";
 
 const privateKey = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs8", format: "pem" });
 const requests = [];
@@ -28,6 +29,14 @@ assert.deepEqual(await client.listAccessibleRepositories("123"), [
 ]);
 assert.equal(await client.installationTokenForRepository("123", 17, "owner/repo"), "fixture-token");
 assert.deepEqual(requests.at(-1).body, { repository_ids: [23], permissions: { contents: "read" } });
+const requestsBeforeIssue = requests.length;
+assert.equal(await client.issueTokenForRepository("123", 17, "owner/repo"), "fixture-token");
+assert.deepEqual(requests.at(-1).body, { repository_ids: [23], permissions: { issues: "write" } });
+await client.issueTokenForRepository("123", 17, "owner/repo");
+assert.ok(requests.length > requestsBeforeIssue + 4, "Issue operations obtain fresh credentials rather than retaining an expiring token");
+const appConfig = { environment: "test", github: { repository: "owner/repo", appId: "123", installationId: 17 }, coding: { repositoryPath: "/workspaces/repositories/owner/repo" } };
+assert.equal(parseConfig(appConfig).github.appId, "123");
+assert.throws(() => parseConfig({ ...appConfig, github: { repository: "owner/repo", appId: "123" } }), /configured together/);
 assert.deepEqual(await client.repositoryAccess("123", 17, "owner/repo"), {
   repository: "owner/repo", permissions: { contents: "write", issues: "read", pull_requests: "write" },
 });

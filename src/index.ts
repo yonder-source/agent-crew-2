@@ -10,6 +10,7 @@ import { GitHubIssueError, OctokitGitHubIssueProvider } from "./github-issues.js
 import { GitHubAppClient, GitHubAppError } from "./github-app.js";
 import { cloneRepository } from "./repository-clone.js";
 import { validateCheckout, type ConnectionCheck } from "./repository-validation.js";
+import { connectionConfig } from "./setup-config.js";
 
 const NAMESPACE = "agent-crew-job";
 const JOB_STATUSES = ["starting", "active", "completed", "needs-inspection", "retry-approved", "abandoned"] as const;
@@ -152,7 +153,12 @@ export default definePluginEntry({
     const bootId = randomUUID();
     let queue = Promise.resolve();
     let startingJobId: string | undefined;
+    let pendingDispatches = 0;
     let setupApplying = false;
+    let pollingReady = config.github?.appId === undefined;
+    let pollingReason = config.github ? "Connection checks pending" : "No active repository connection";
+    let pollingInspectionRequired = false;
+    let activationPending = false;
     let admissionEpoch = 0;
     let discovery: IssueDiscovery | undefined;
     let issueUpdateQueue = Promise.resolve();
@@ -172,11 +178,13 @@ export default definePluginEntry({
         throw new Error("Gateway request failed; operator inspection required");
       }
     };
-    const issueProvider = new OctokitGitHubIssueProvider({
-      getInstallationToken: async () => readFile("/run/secrets/agent-crew-github-installation-token", "utf8"),
-    });
     const githubApp = new GitHubAppClient({
       readPrivateKey: async () => readFile("/run/secrets/agent-crew-github-app-private-key", "utf8"),
+    });
+    const issueProvider = new OctokitGitHubIssueProvider({
+      getInstallationToken: async () => config.github?.appId !== undefined
+        ? githubApp.issueTokenForRepository(config.github.appId, config.github.installationId, config.github.repository)
+        : readFile("/run/secrets/agent-crew-github-installation-token", "utf8"),
     });
     const describe = async (issue: Issue) => {
       const response: unknown = await call("sessions.describe", { key: issueSessionKey(issue) });
@@ -331,9 +339,10 @@ export default definePluginEntry({
 
     const dispatchIssue = (issue: Issue): Promise<Job> => {
       const requestedEpoch = admissionEpoch;
-      const admissionWasOpen = !setupApplying;
+      const admissionWasOpen = !setupApplying && pollingReady;
+      pendingDispatches += 1;
       return serialize(async () => {
-      if (!admissionWasOpen || setupApplying || requestedEpoch !== admissionEpoch) {
+      if (!admissionWasOpen || setupApplying || !pollingReady || requestedEpoch !== admissionEpoch) {
         throw new Error("Issue admission is paused while repository settings are being applied.");
       }
       const session = describe(issue);
@@ -468,7 +477,7 @@ export default definePluginEntry({
       } finally {
         startingJobId = undefined;
       }
-      });
+      }).finally(() => { pendingDispatches -= 1; });
     };
 
     const statusTool = {
@@ -523,10 +532,11 @@ export default definePluginEntry({
       }
     }, { scope: "operator.admin" });
 
-    api.registerGatewayMethod("agent-crew.setup.validate", async ({ respond }) => {
-      try {
-        const store = api.runtime.state.openKeyedStoreV2<SetupDraft>({ namespace: "setup-draft", retention: "retained" });
-        const draft = parseSetupDraft(await store.lookup("current"));
+    const readSetupDraft = async () => {
+      const store = api.runtime.state.openKeyedStoreV2<SetupDraft>({ namespace: "setup-draft", retention: "retained" });
+      return parseSetupDraft(await store.lookup("current"));
+    };
+    const validateSetupDraft = async (draft: SetupDraft) => {
         const checks: ConnectionCheck[] = [];
         try {
           const access = await githubApp.repositoryAccess(draft.githubAppId, Number(draft.installationId), draft.repository);
@@ -551,9 +561,104 @@ export default definePluginEntry({
           checks.push({ id, status: exists ? "passed" : "failed", message: exists ? `Agent ${agentId} is configured.` : "Select an available agent." });
         }
         checks.push({ id: "writes", status: "unverified", message: "Push, issue writes and PR creation require separate live qualification." });
-        respond(true, { checks, valid: !checks.some((check) => check.status === "failed" || (check.status === "unverified" && check.id !== "writes")) });
+        return { checks, draftHash: createHash("sha256").update(JSON.stringify(draft)).digest("hex"),
+          valid: !checks.some((check) => check.status === "failed" || (check.status === "unverified" && check.id !== "writes")) };
+    };
+    api.registerGatewayMethod("agent-crew.setup.validate", async ({ respond }) => {
+      try {
+        respond(true, await validateSetupDraft(await readSetupDraft()));
       } catch {
         respond(false, undefined, { code: "SETUP_VALIDATION_FAILED", message: "Save a complete draft before validation; verify Gateway access." });
+      }
+    }, { scope: "operator.admin" });
+
+    const resumePolling = async () => {
+      const epoch = admissionEpoch;
+      if (setupApplying) throw new Error("Repository settings are being applied.");
+      if (activationPending) throw new Error("Saved settings await runtime activation; restart Gateway if they remain pending.");
+      if (!config.github || !config.coding) throw new Error("No active repository connection.");
+      await assertNoActiveCodingTasks();
+      const checkout = await validateCheckout(config.github.repository, config.coding.repositoryPath);
+      if (checkout.status !== "passed") throw new Error("Active repository checkout is not ready.");
+      if (config.github.appId !== undefined) {
+        await githubApp.repositoryAccess(config.github.appId, config.github.installationId, config.github.repository);
+      }
+      if (setupApplying || epoch !== admissionEpoch) throw new Error("Repository settings changed during polling checks.");
+      pollingReady = true;
+      pollingInspectionRequired = false;
+      pollingReason = "";
+      discovery?.resume();
+    };
+    api.registerGatewayMethod("agent-crew.setup.polling.status", ({ respond }) => {
+      respond(true, { running: Boolean(config.github) && pollingReady && !setupApplying, reason: pollingReason, activationPending });
+    }, { scope: "operator.admin" });
+    api.registerGatewayMethod("agent-crew.setup.polling.resume", async ({ respond }) => {
+      try {
+        await serialize(resumePolling);
+        respond(true, { running: true });
+      } catch {
+        respond(false, undefined, { code: "POLLING_BLOCKED", message: "Polling is blocked; verify the connection and resolve active or uncertain tasks." });
+      }
+    }, { scope: "operator.admin" });
+    api.registerGatewayMethod("agent-crew.setup.apply", async ({ params, respond }) => {
+      if (setupApplying || pendingDispatches > 0) {
+        respond(false, undefined, { code: "SETUP_APPLY_BLOCKED", message: "Repository setup or task dispatch is already in progress." });
+        return;
+      }
+      setupApplying = true;
+      admissionEpoch += 1;
+      discovery?.pause();
+      const previouslyReady = pollingReady;
+      pollingReady = false;
+      pollingReason = "Applying repository settings";
+      let committing = false;
+      let unchanged = false;
+      try {
+        await assertNoActiveCodingTasks();
+        await serialize(async () => {
+          await assertNoActiveCodingTasks();
+          const draft = await readSetupDraft();
+          const validation = await validateSetupDraft(draft);
+          if (!validation.valid) throw new Error("Saved connection validation failed.");
+          if (!isRecord(params) || params.draftHash !== validation.draftHash) throw new Error("Saved draft changed; validate it again before Apply.");
+          const snapshot: unknown = await call("config.get", {});
+          const replacement = connectionConfig(snapshot, {
+            repository: draft.repository, appId: draft.githubAppId, installationId: Number(draft.installationId),
+            agentId: draft.codingAgentId, repositoryPath: draft.repositoryPath,
+          });
+          const token = await githubApp.installationTokenForRepository(draft.githubAppId, Number(draft.installationId), draft.repository);
+          await cloneRepository({ repository: draft.repository, repositoryPath: draft.repositoryPath, token });
+          if (JSON.stringify(await readSetupDraft()) !== JSON.stringify(draft)) throw new Error("Draft changed during Apply; validate and apply again.");
+          unchanged = config.github?.appId === draft.githubAppId && config.github.installationId === Number(draft.installationId) &&
+            config.github.repository === draft.repository && config.coding?.agentId === draft.codingAgentId && config.coding.repositoryPath === draft.repositoryPath;
+          if (unchanged) return;
+          committing = true;
+          await call("config.set", replacement);
+          activationPending = true;
+          pollingInspectionRequired = true;
+          pollingReason = "Connection saved; runtime activation pending. Restart Gateway if it stays inactive.";
+        });
+        if (unchanged) {
+          setupApplying = false;
+          await serialize(resumePolling);
+        }
+        respond(true, { saved: true, activationPending: !unchanged, message: unchanged
+          ? "Connection is already active; scheduling checks passed."
+          : "Connection saved. Runtime activation and scheduling checks are pending; restart Gateway if settings stay inactive." });
+      } catch {
+        if (!committing) {
+          pollingReady = previouslyReady;
+          pollingReason = previouslyReady ? "" : "Connection is not ready";
+          if (previouslyReady) discovery?.resume();
+        } else {
+          pollingInspectionRequired = true;
+          pollingReason = "Configuration outcome requires inspection; verify runtime settings before resuming polling.";
+        }
+        respond(false, undefined, { code: "SETUP_APPLY_FAILED", message: committing
+          ? "Configuration application was not acknowledged. Inspect Gateway settings before retrying or resuming polling."
+          : "Apply blocked or failed before changing active configuration. Check validation and active or uncertain tasks." });
+      } finally {
+        setupApplying = false;
       }
     }, { scope: "operator.admin" });
 
@@ -570,7 +675,7 @@ export default definePluginEntry({
     }, { scope: "operator.admin" });
 
     api.registerGatewayMethod("agent-crew.setup.repository.clone", async ({ params, respond }) => {
-      if (setupApplying) {
+      if (setupApplying || pendingDispatches > 0) {
         respond(false, undefined, { code: "SETUP_APPLY_IN_PROGRESS", message: "Repository setup is already being applied." });
         return;
       }
@@ -671,15 +776,32 @@ export default definePluginEntry({
         onComplete: (count) => api.logger.info(count === 0
           ? "GitHub issue discovery completed; no ready issues found."
           : `GitHub issue discovery completed; processed ${count} ready issue(s).`),
-        onFailure: () => api.logger.error("GitHub issue discovery failed; no empty-result state was recorded."),
+        onFailure: () => {
+          pollingReady = false;
+          pollingReason = "GitHub discovery failed; verify credentials and task state.";
+          issueDiscovery.pause();
+          api.logger.error("GitHub issue discovery failed; no empty-result state was recorded.");
+        },
       });
       discovery = issueDiscovery;
+      if (!pollingReady) issueDiscovery.pause();
+      const pollWhenReady = async () => {
+        if (setupApplying || pollingInspectionRequired) return;
+        try {
+          if (!pollingReady) await serialize(resumePolling);
+          if (!setupApplying && pollingReady) await issueDiscovery.poll();
+        } catch {
+          pollingReady = false;
+          pollingReason = "Polling blocked by connection health or active/uncertain task state.";
+          issueDiscovery.pause();
+        }
+      };
       let pollingTimer: ReturnType<typeof setInterval> | undefined;
       api.registerService({
         id: "agent-crew-github-discovery",
         start() {
-          void issueDiscovery.poll();
-          pollingTimer = setInterval(() => { void issueDiscovery.poll(); }, pollIntervalMs);
+          void pollWhenReady();
+          pollingTimer = setInterval(() => { void pollWhenReady(); }, pollIntervalMs);
         },
         stop() {
           if (pollingTimer !== undefined) clearInterval(pollingTimer);

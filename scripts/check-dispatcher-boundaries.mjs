@@ -97,6 +97,12 @@ assert.equal(methods.get("agent-crew.dispatch").options.scope, "operator.admin")
 holdWorkflow = true;
 const runningDispatch = dispatch();
 await workflowStarted;
+await methods.get("agent-crew.setup.apply").handler({
+  respond: (ok, _value, error) => {
+    assert.equal(ok, false);
+    assert.equal(error.code, "SETUP_APPLY_BLOCKED");
+  },
+});
 assert.equal(calls.filter((method) => method === "sessions.describe").length, 1);
 const assignedJob = session.pluginExtensions[0].value;
 const issueTools = issueToolFactory.create({

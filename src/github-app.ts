@@ -135,6 +135,11 @@ export class GitHubAppClient {
     return this.createInstallationToken(selected.installation.id, selected.jwt, selected.repository.id);
   }
 
+  async issueTokenForRepository(appId: unknown, installationId: unknown, repository: unknown): Promise<string> {
+    const selected = await this.resolveRepository(appId, installationId, repository);
+    return this.createInstallationToken(selected.installation.id, selected.jwt, selected.repository.id, "issues");
+  }
+
   async repositoryAccess(appId: unknown, installationId: unknown, repository: unknown): Promise<{
     repository: string; permissions: Record<string, string>;
   }> {
@@ -185,10 +190,11 @@ export class GitHubAppClient {
     }
   }
 
-  private async createInstallationToken(installationId: number, jwt: string, repositoryId?: number): Promise<string> {
+  private async createInstallationToken(installationId: number, jwt: string, repositoryId?: number, access: "contents" | "issues" = "contents"): Promise<string> {
+    const permissions = access === "issues" ? { issues: "write" } : { contents: "read" };
     const body = repositoryId === undefined
-      ? { permissions: { contents: "read" } }
-      : { repository_ids: [repositoryId], permissions: { contents: "read" } };
+      ? { permissions }
+      : { repository_ids: [repositoryId], permissions };
     const value = await this.request(`/app/installations/${installationId}/access_tokens`, jwt, "POST", body);
     if (!isRecord(value) || typeof value.token !== "string" || !value.token || typeof value.expires_at !== "string") {
       throw new GitHubAppError("GITHUB_RESPONSE_INVALID", "GitHub returned an invalid installation token response.");
