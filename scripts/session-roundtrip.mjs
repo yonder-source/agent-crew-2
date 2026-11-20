@@ -3,7 +3,8 @@ import { spawnSync } from "node:child_process";
 
 const port = process.env.OPENCLAW_GATEWAY_PORT ?? "18789";
 const token = process.env.OPENCLAW_GATEWAY_TOKEN ?? "disposable-agent-crew-token";
-const params = JSON.stringify({ key: "agent:main:agent-crew-wbs1", pluginId: "agent-crew", namespace: "agent-crew-job", value: { jobId: "synthetic-wbs1", status: "probe" } });
+const key = "agent:main:agent-crew-wbs1";
+const params = JSON.stringify({ key, pluginId: "agent-crew", namespace: "agent-crew-job", value: { jobId: "synthetic-wbs1", status: "probe" } });
 
 function call(method, input = "{}") {
   const result = spawnSync("openclaw", ["gateway", "call", method, "--port", port, "--token", token, "--params", input, "--json"], { encoding: "utf8" });
@@ -13,14 +14,13 @@ function call(method, input = "{}") {
 
 const verifyOnly = process.argv.includes("--verify-only");
 if (!verifyOnly) {
-  const current = call("sessions.list");
-  if (!current.sessions?.some((item) => item.key === "agent:main:agent-crew-wbs1")) {
-    call("sessions.create", JSON.stringify({ key: "agent:main:agent-crew-wbs1" }));
+  const current = call("sessions.describe", JSON.stringify({ key }));
+  if (!current.session) {
+    call("sessions.create", JSON.stringify({ key }));
   }
   call("sessions.pluginPatch", params);
 }
-const sessions = call("sessions.list");
-const session = sessions.sessions?.find((item) => item.key === "agent:main:agent-crew-wbs1");
+const { session } = call("sessions.describe", JSON.stringify({ key }));
 assert.ok(session, "synthetic Gateway session was not found");
 const extension = session.pluginExtensions?.find((item) => item.pluginId === "agent-crew" && item.namespace === "agent-crew-job");
 assert.equal(extension?.value?.jobId, "synthetic-wbs1", JSON.stringify(session));

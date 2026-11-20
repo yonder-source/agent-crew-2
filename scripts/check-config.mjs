@@ -5,10 +5,28 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseConfig } from "../src/config.mjs";
 
-assert.deepEqual(parseConfig({ environment: " test " }), { environment: "test" });
-assert.deepEqual(parseConfig({ environment: "test", github: { repository: "Owner/Repo" } }), {
-  environment: "test", github: { repository: "owner/repo", pollIntervalMs: 60_000 },
+const codingExample = JSON.parse(readFileSync("infra/local-dev/openclaw/openclaw.coding.example.json", "utf8"));
+assert.deepEqual(parseConfig(codingExample.plugins.entries["agent-crew"].config), {
+  environment: "local-coding",
+  github: { repository: "owner/repo", pollIntervalMs: 60_000 },
+  coding: { agentId: "coding", repositoryPath: "/workspaces/repositories/owner/repo" },
 });
+assert.deepEqual(parseConfig({ environment: " test " }), { environment: "test" });
+assert.throws(() => parseConfig({ environment: "test", github: { repository: "Owner/Repo" } }),
+  /coding configuration is required/);
+assert.deepEqual(parseConfig({ environment: "test", github: { repository: "Owner/Repo" },
+  coding: { repositoryPath: "/workspaces/repositories/owner/repo" } }), {
+  environment: "test", github: { repository: "owner/repo", pollIntervalMs: 60_000 },
+  coding: { agentId: "coding", repositoryPath: "/workspaces/repositories/owner/repo" },
+});
+assert.throws(() => parseConfig({ environment: "test", github: { repository: "Owner/Repo" },
+  coding: { repositoryPath: "relative/repo" } }), /coding configuration is invalid/);
+for (const agentId of ["worker", "coding-team"]) {
+  assert.equal(parseConfig({ environment: "test", github: { repository: "owner/repo" },
+    coding: { agentId, repositoryPath: "/workspaces/repositories/owner/repo" } }).coding.agentId, agentId);
+}
+assert.throws(() => parseConfig({ environment: "test", github: { repository: "owner/repo" },
+  coding: { agentId: "../main", repositoryPath: "/workspaces/repositories/owner/repo" } }), /coding configuration is invalid/);
 assert.throws(() => parseConfig({ environment: "test", github: { repository: "invalid" } }), /GitHub configuration is invalid/);
 assert.throws(() => parseConfig({}), /requires an environment name/);
 assert.throws(() => parseConfig({ environment: " " }), /non-empty environment name/);
@@ -18,6 +36,16 @@ assert.throws(
 );
 const directory = mkdtempSync(join(tmpdir(), "agent-crew-config-"));
 try {
+  const codingExamplePath = join(directory, "openclaw-coding.json");
+  writeFileSync(codingExamplePath, JSON.stringify(codingExample));
+  const codingConfigValidation = spawnSync("openclaw", ["config", "validate", "--json"], {
+    encoding: "utf8",
+    env: { ...process.env, OPENCLAW_CONFIG_PATH: codingExamplePath },
+    timeout: 30_000,
+  });
+  assert.ifError(codingConfigValidation.error);
+  assert.equal(codingConfigValidation.status, 0,
+    codingConfigValidation.stdout + codingConfigValidation.stderr);
   for (const config of [{}, { environment: { value: "test-secret" } }]) {
     const fixture = JSON.parse(readFileSync(new URL("../openclaw.json", import.meta.url), "utf8"));
     fixture.plugins.entries["agent-crew"].config = config;

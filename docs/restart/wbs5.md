@@ -65,6 +65,7 @@ from fixture checks.
 
 ## Handoff
 
-The MVP workflow reports the PR result through Slack and leaves review and
+[WBS5.5](wbs5.5.md) provides the repository connection UI using the settings
+and permissions established here. WBS6 then reports the PR result through Slack and leaves review and
 merge to a human. Automated repair, detailed check/review evidence processing
 and automatic reconciliation of uncertain writes remain for later review.

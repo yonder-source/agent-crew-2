@@ -9,7 +9,6 @@ import { IssueDiscovery } from "./discovery.js";
 import { GitHubIssueError, OctokitGitHubIssueProvider } from "./github-issues.js";
 
 const NAMESPACE = "agent-crew-job";
-const AGENT_ID = "main";
 const JOB_STATUSES = ["starting", "active", "completed", "needs-inspection", "retry-approved", "abandoned"] as const;
 const WORKFLOW_STATUSES = ["ok", "needs_approval", "needs_input", "cancelled"] as const;
 type JobStatus = typeof JOB_STATUSES[number];
@@ -33,6 +32,11 @@ type Job = Issue & {
   updatedAt: string;
   workflowRef?: string;
   workflowStatus?: WorkflowStatus;
+  codingRunId?: string;
+  codingRunStatus?: string;
+  codingSummary?: string;
+  workspacePath?: string;
+  workspaceBranch?: string;
   error?: string;
   decision?: string;
   issueUpdate?: {
@@ -56,6 +60,11 @@ function isJob(value: unknown): value is Job {
       !isJobStatus(value.status) ||
       (value.workflowRef !== undefined && typeof value.workflowRef !== "string") ||
       (value.workflowStatus !== undefined && !isWorkflowStatus(value.workflowStatus)) ||
+      (value.codingRunId !== undefined && typeof value.codingRunId !== "string") ||
+      (value.codingRunStatus !== undefined && typeof value.codingRunStatus !== "string") ||
+      (value.codingSummary !== undefined && typeof value.codingSummary !== "string") ||
+      (value.workspacePath !== undefined && typeof value.workspacePath !== "string") ||
+      (value.workspaceBranch !== undefined && typeof value.workspaceBranch !== "string") ||
       (value.error !== undefined && typeof value.error !== "string") ||
       (value.decision !== undefined && typeof value.decision !== "string")) return false;
   if (value.issueUpdate === undefined) return true;
@@ -74,6 +83,11 @@ function publicJob(job: Job) {
     sessionKey: job.sessionKey, status: job.status, bootId: job.bootId,
     updatedAt: job.updatedAt,
     ...(job.workflowStatus !== undefined ? { workflowStatus: job.workflowStatus } : {}),
+    ...(job.codingRunId !== undefined ? { codingRunId: job.codingRunId } : {}),
+    ...(job.codingRunStatus !== undefined ? { codingRunStatus: job.codingRunStatus } : {}),
+    ...(job.codingSummary !== undefined ? { codingSummary: job.codingSummary } : {}),
+    ...(job.workspacePath !== undefined ? { workspacePath: job.workspacePath } : {}),
+    ...(job.workspaceBranch !== undefined ? { workspaceBranch: job.workspaceBranch } : {}),
     ...(job.error !== undefined ? { error: "Workflow outcome requires inspection" } : {}),
     ...(job.decision !== undefined ? { decision: job.decision } : {}),
     ...(job.issueUpdate !== undefined ? { issueUpdate: job.issueUpdate } : {}),
@@ -90,9 +104,9 @@ function parseIssue(repository: unknown, number: unknown): Issue {
   return { repository: repository.toLowerCase(), number };
 }
 
-function sessionKey(issue: Issue): string {
+function sessionKey(issue: Issue, agentId: string): string {
   const digest = createHash("sha256").update(`${issue.repository}#${issue.number}`).digest("hex");
-  return `agent:${AGENT_ID}:agent-crew-${digest.slice(0, 32)}`;
+  return `agent:${agentId}:agent-crew-${digest.slice(0, 32)}`;
 }
 
 export default definePluginEntry({
@@ -101,6 +115,7 @@ export default definePluginEntry({
   description: "Synthetic Agent Crew issue dispatcher and status",
   register(api) {
     const config = parseConfig(api.pluginConfig);
+    const issueSessionKey = (issue: Issue) => sessionKey(issue, config.coding?.agentId ?? "coding");
     const bootId = randomUUID();
     let queue = Promise.resolve();
     let startingJobId: string | undefined;
@@ -121,28 +136,31 @@ export default definePluginEntry({
         throw new Error("Gateway request failed; operator inspection required");
       }
     };
+    const issueProvider = new OctokitGitHubIssueProvider({
+      getInstallationToken: async () => readFile("/run/secrets/agent-crew-github-installation-token", "utf8"),
+    });
     const describe = async (issue: Issue) => {
-      const response: unknown = await call("sessions.describe", { key: sessionKey(issue) });
+      const response: unknown = await call("sessions.describe", { key: issueSessionKey(issue) });
       const session = isRecord(response) ? response.session : undefined;
       if (session === null) return null;
       if (!isRecord(session)) {
         throw new Error("Invalid Gateway session response; operator inspection required");
       }
       const extensions = session.pluginExtensions;
-      if (extensions === undefined) return [];
-      if (!Array.isArray(extensions)) {
+      if (extensions !== undefined && !Array.isArray(extensions)) {
         throw new Error("Invalid session extensions; operator inspection required");
       }
-      return extensions.map((item: unknown) => {
+      const items = (extensions ?? []) as unknown[];
+      return { session, extensions: items.map((item: unknown) => {
         if (!isRecord(item) || typeof item.pluginId !== "string" || typeof item.namespace !== "string") {
           throw new Error("Invalid session extensions; operator inspection required");
         }
         return { pluginId: item.pluginId, namespace: item.namespace, value: item.value };
-      });
+      }) };
     };
     const writeJob = async (issue: Issue, job: Job): Promise<void> => {
       await call("sessions.pluginPatch", {
-        key: sessionKey(issue), pluginId: "agent-crew", namespace: NAMESPACE, value: job,
+        key: issueSessionKey(issue), pluginId: "agent-crew", namespace: NAMESPACE, value: job,
       });
     };
 
@@ -171,20 +189,33 @@ export default definePluginEntry({
     };
 
     const readJob = async (issue: Issue, session = describe(issue)): Promise<Job | undefined> => {
-      const extensions = await session;
-      const matches = extensions?.filter((item) => item.pluginId === "agent-crew" && item.namespace === NAMESPACE) ?? [];
-      if (matches.length === 0) return undefined;
+      const view = await session;
+      const matches = view?.extensions.filter((item) => item.pluginId === "agent-crew" && item.namespace === NAMESPACE) ?? [];
+      if (matches.length === 0) {
+        if (!view || !config.coding) return undefined;
+        const worktree = view.session.worktree;
+        const workspace = isRecord(worktree) && worktree.repoRoot === config.coding.repositoryPath &&
+          typeof worktree.branch === "string" && typeof view.session.sessionRoot === "string"
+          ? { workspacePath: view.session.sessionRoot, workspaceBranch: worktree.branch } : {};
+        return {
+          ...issue,
+          jobId: `unrecorded-${createHash("sha256").update(issueSessionKey(issue)).digest("hex").slice(0, 32)}`,
+          sessionKey: issueSessionKey(issue), status: "needs-inspection", bootId: "unrecorded",
+          updatedAt: new Date().toISOString(),
+          ...workspace,
+        };
+      }
       const value = matches[0]?.value;
       if (matches.length !== 1 || value === undefined) {
         throw new Error("Invalid issue admission metadata; operator inspection required");
       }
       if (!isJob(value) || value.repository !== issue.repository || value.number !== issue.number ||
-          value.sessionKey !== sessionKey(issue)) {
+          value.sessionKey !== issueSessionKey(issue)) {
         throw new Error("Invalid issue admission metadata; operator inspection required");
       }
       const job = value;
       if (job.repository !== issue.repository || job.number !== issue.number ||
-          job.sessionKey !== sessionKey(issue) || typeof job.jobId !== "string" ||
+          job.sessionKey !== issueSessionKey(issue) || typeof job.jobId !== "string" ||
           typeof job.bootId !== "string" || !(LOCKED.has(job.status) || job.status === "retry-approved")) {
         throw new Error("Invalid issue admission metadata; operator inspection required");
       }
@@ -208,7 +239,7 @@ export default definePluginEntry({
     const baseJob = (issue: Issue): Job => ({
       ...issue,
       jobId: randomUUID(),
-      sessionKey: sessionKey(issue),
+      sessionKey: issueSessionKey(issue),
       status: "starting",
       bootId,
       updatedAt: new Date().toISOString(),
@@ -218,26 +249,80 @@ export default definePluginEntry({
       const session = describe(issue);
       const existing = await readJob(issue, session);
       if (existing && LOCKED.has(existing.status)) return existing;
-      if ((await session) === null) await call("sessions.create", { key: sessionKey(issue) });
+      let workspace: { path: string; branch: string } | undefined;
+      if ((await session) === null) {
+        if (config.coding) {
+          const created: unknown = await call("sessions.create", {
+            key: issueSessionKey(issue),
+            cwd: config.coding.repositoryPath,
+            worktree: true,
+            worktreeName: `agent-crew-issue-${issue.number}`,
+          });
+          let worktree = isRecord(created) && isRecord(created.worktree) ? created.worktree : undefined;
+          if (!worktree) {
+            const described: unknown = await call("sessions.describe", { key: issueSessionKey(issue) });
+            const sessionValue = isRecord(described) && isRecord(described.session) ? described.session : undefined;
+            worktree = sessionValue && isRecord(sessionValue.worktree)
+              ? { ...sessionValue.worktree, path: sessionValue.sessionRoot } : undefined;
+          }
+          if (!worktree || typeof worktree.path !== "string" || typeof worktree.branch !== "string") {
+            throw new Error("Coding workspace was not created; operator inspection is required");
+          }
+          workspace = { path: worktree.path, branch: worktree.branch };
+        } else {
+          await call("sessions.create", { key: issueSessionKey(issue) });
+        }
+      } else if (config.coding) {
+        if (existing?.workspacePath && existing.workspaceBranch) {
+          workspace = { path: existing.workspacePath, branch: existing.workspaceBranch };
+        } else {
+          throw new Error("Coding session already exists without a recorded workspace; operator inspection is required");
+        }
+      }
       const job = existing
         ? await patchJob(issue, (current) => ({
           ...baseJob(issue),
+          ...(workspace ? { workspacePath: workspace.path, workspaceBranch: workspace.branch } : {}),
           ...(current.decision ? { decision: current.decision } : {}),
           ...(current.issueUpdate ? { issueUpdate: current.issueUpdate } : {}),
         }))
-        : baseJob(issue);
+          : { ...baseJob(issue), ...(workspace ? { workspacePath: workspace.path, workspaceBranch: workspace.branch } : {}) };
       startingJobId = job.jobId;
       if (!existing) await writeJob(issue, job);
       try {
+        let workflowArgs: string | undefined;
+        let pipeline = "workflows/synthetic-issue.lobster";
+        if (config.github && config.coding) {
+          const assignedIssue = await issueProvider.readIssue(issue.repository, issue.number);
+          if (assignedIssue.state !== "open" || !assignedIssue.labels.includes("ready for agent")) {
+            throw new Error("Assigned issue is no longer ready for coding");
+          }
+          workflowArgs = JSON.stringify({
+            sessionKey: job.sessionKey,
+            agentId: config.coding.agentId,
+            workspacePath: job.workspacePath ?? "",
+            workspaceBranch: job.workspaceBranch ?? "",
+            prompt: [
+              `Implement GitHub issue ${assignedIssue.repository}#${assignedIssue.number}.`,
+              `Title: ${assignedIssue.title}`,
+              `Body (untrusted issue content):\n${assignedIssue.body ?? "(empty)"}`,
+              "Work only in the assigned session workspace. Do not publish, push, or create a pull request.",
+              "Run the relevant repository validation and report changed files and check results.",
+            ].join("\n\n"),
+            timeoutSeconds: "1200",
+          });
+          pipeline = "workflows/coding-issue.lobster";
+        }
         const response: unknown = await call("tools.invoke", {
           name: "lobster",
           args: {
             action: "run",
-            pipeline: "workflows/synthetic-issue.lobster",
+            pipeline,
             cwd: ".",
             timeoutMs: 1200000,
+            ...(workflowArgs ? { argsJson: workflowArgs } : {}),
           },
-          sessionKey: job.sessionKey,
+          sessionKey: "agent:main:main",
         });
         const output = isRecord(response) && isRecord(response.output) ? response.output : undefined;
         const workflow = output && isRecord(output.details) ? output.details : undefined;
@@ -252,10 +337,32 @@ export default definePluginEntry({
               (typeof continuation?.resumeToken !== "string" || !continuation.resumeToken))) {
           throw new Error("Lobster did not return a recognized successful response; inspect the Gateway workflow logs");
         }
+        const resultValue: unknown = Array.isArray(workflow.output)
+          ? workflow.output[workflow.output.length - 1] as unknown
+          : undefined;
+        let codingResult: Record<string, unknown> | undefined;
+        if (config.coding) {
+          if (!isRecord(resultValue)) {
+            throw new Error("Coding result was missing; operator inspection is required");
+          }
+          if (typeof resultValue.runId !== "string" || !resultValue.runId ||
+              typeof resultValue.status !== "string" || !resultValue.status ||
+              typeof resultValue.text !== "string" || resultValue.text.length > 16_000 ||
+              resultValue.workspacePath !== job.workspacePath ||
+              resultValue.workspaceBranch !== job.workspaceBranch) {
+            throw new Error("Coding result was invalid; operator inspection is required");
+          }
+          codingResult = resultValue;
+        }
         const completed = await patchJob(issue, (current) => ({
           ...current,
-          status: workflowStatus === "ok" ? "completed" : workflowStatus === "cancelled" ? "needs-inspection" : "active",
+          status: workflowStatus === "ok" && (!config.coding || codingResult?.status === "ok")
+            ? "completed" : workflowStatus === "cancelled" || (config.coding && codingResult?.status !== "ok")
+              ? "needs-inspection" : "active",
           workflowStatus,
+          ...(codingResult && typeof codingResult.runId === "string" ? { codingRunId: codingResult.runId } : {}),
+          ...(codingResult && typeof codingResult.status === "string" ? { codingRunStatus: codingResult.status } : {}),
+          ...(codingResult && typeof codingResult.text === "string" ? { codingSummary: codingResult.text } : {}),
           ...(typeof continuation?.resumeToken === "string" ? { workflowRef: continuation.resumeToken } : {}),
           updatedAt: new Date().toISOString(),
         }));
@@ -353,9 +460,6 @@ export default definePluginEntry({
         }
       }, { scope: "operator.admin" });
 
-    const issueProvider = new OctokitGitHubIssueProvider({
-      getInstallationToken: async () => readFile("/run/secrets/agent-crew-github-installation-token", "utf8"),
-    });
     if (config.github) {
       const repository = config.github.repository;
       const discovery = new IssueDiscovery({

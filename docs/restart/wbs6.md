@@ -10,13 +10,16 @@ the MVP workflow.
 
 - [WBS5-restart](wbs5.md) is complete: the Controller can publish a draft PR
   and return its URL to Lobster.
+- [WBS5.5](wbs5.5.md) is complete: the operator can connect one repository
+  through the OpenClaw-accessible UI and retain its validated configuration.
 - A disposable GitHub test repository and Slack channel are available for the
   integration check. Supply credentials through the agreed secret mechanism.
 
 ## 6.1 Configure the workflow
 
-**Work:** Provide the minimum configuration for the repository, Slack channel,
-agent, polling interval and credential references used by the existing slices.
+**Work:** Use the WBS5.5 repository connection UI and provide the remaining
+Slack channel, agent, polling interval and credential references needed by the
+existing slices.
 Use the selected OpenClaw configuration facilities where suitable.
 
 **Done when:** An operator can configure one repository and Slack channel and
@@ -45,7 +48,8 @@ See [workflow failures](../../SPEC.md#error-workflow).
 
 ## 6.4 Exercise the MVP workflow
 
-**Work:** In the disposable installation, manually label a test issue and follow
+**Work:** In the disposable installation, connect the repository through the
+WBS5.5 UI, then manually label a test issue and follow
 it through discovery, coding, Controller publication and Slack reporting.
 
 **Done when:** One coding workflow produces a draft PR and the configured Slack

@@ -19,5 +19,19 @@ export function parseConfig(value) {
       pollIntervalMs < 10_000 || pollIntervalMs > 3_600_000) {
     throw new Error("Agent Crew GitHub configuration is invalid.");
   }
-  return { ...config, github: { repository: repository.toLowerCase(), pollIntervalMs } };
+  const result = { ...config, github: { repository: repository.toLowerCase(), pollIntervalMs } };
+  if (value.coding !== undefined) {
+    const coding = value.coding;
+    if (typeof coding !== "object" || coding === null || Array.isArray(coding)) {
+      throw new Error("Agent Crew coding configuration is invalid.");
+    }
+    const agentId = coding.agentId ?? "coding";
+    if (typeof agentId !== "string" || !/^[a-z][a-z0-9_-]*$/.test(agentId) ||
+        typeof coding.repositoryPath !== "string" || !coding.repositoryPath.startsWith("/")) {
+      throw new Error("Agent Crew coding configuration is invalid.");
+    }
+    return { ...result, coding: { agentId, repositoryPath: coding.repositoryPath } };
+  }
+  if (result.github) throw new Error("Agent Crew coding configuration is required when GitHub discovery is enabled.");
+  return result;
 }
