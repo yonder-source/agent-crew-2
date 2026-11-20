@@ -14,10 +14,11 @@ SPEC](../../SPEC.md) defines the MVP workflow.
   Configure credentials through the agreed secret mechanism.
 - Set `coding.agentId` (default `coding`) to a configured OpenClaw agent.
   Session keys and the Lobster agent target use this same setting.
-- Configure the matching local Git checkout under the Gateway's
-  `/workspaces/repositories` bind and set `plugins.entries.agent-crew.config.coding.repositoryPath`
-  to that in-container path. GitHub discovery and coding require both the
-  configured repository and this checkout.
+- Copy `infra/local-dev/openclaw/openclaw.coding.example.json` to
+  `.local/openclaw-coding.json`, set the same `owner/repo` in its GitHub
+  repository and `coding.repositoryPath`, then clone the repository under
+  `.local/repositories/owner/repo`. The in-container checkout path is
+  `/workspaces/repositories/owner/repo`.
 - Set `AGENT_CREW_DOCKER_SOCKET_GID` to the host socket's group ID when it is
   different from the local Compose default (`1001`).
 
@@ -60,11 +61,11 @@ do not start a coding turn.
 ## 4.3 Return the coding result
 
 **Work:** Pass the coding agent's result to the next Lobster step. Include the
-information needed to review the work and continue to publication, such as the
-workspace or branch reference and validation result.
+assigned workspace path and branch alongside the run ID, status and validation
+summary so WBS5 can identify the exact change to review and publish.
 
-**Done when:** Lobster receives a validated run ID and status from the assigned
-run plus workspace and branch references. A timeout, malformed result or
+**Done when:** Lobster receives a validated run ID, status, workspace path,
+branch and validation summary from the assigned run. A timeout, malformed result or
 uncertain run outcome remains visible for operator inspection before retry.
 See [workflow failures](../../SPEC.md#error-workflow) and
 [uncertain outcomes](../../SPEC.md#error-uncertain).

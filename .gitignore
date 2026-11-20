@@ -2,6 +2,7 @@ dist/
 node_modules/
 .openclaw/
 .local/secrets/
+.local/openclaw-coding.json
 .local/openclaw-state/
 .local/repositories/
 

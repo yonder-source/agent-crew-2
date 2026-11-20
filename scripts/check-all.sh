@@ -15,9 +15,11 @@ export AGENT_CREW_SANDBOX_STATE_DIR
 export AGENT_CREW_REPOSITORY_DIR
 
 deployment_model=$(mktemp)
+coding_deployment_model=$(mktemp)
 cleanup() {
   docker compose down --volumes
   rm -f "$deployment_model"
+  rm -f "$coding_deployment_model"
   rm -rf "$AGENT_CREW_WORKTREE_DIR"
   rm -rf "$AGENT_CREW_PROJECTION_DIR"
   rm -rf "$AGENT_CREW_SANDBOX_STATE_DIR"
@@ -27,6 +29,8 @@ trap cleanup EXIT INT TERM
 
 docker compose --profile check config --format json > "$deployment_model"
 node scripts/check-deployment.mjs "$deployment_model"
+docker compose -f "$COMPOSE_FILE" -f infra/local-dev/openclaw/compose.coding.yaml --profile check config --format json > "$coding_deployment_model"
+node scripts/check-deployment.mjs "$coding_deployment_model" infra/local-dev/openclaw/openclaw.coding.example.json
 docker build --target sandbox -t openclaw-sandbox:bookworm-slim .
 docker compose --profile check build
 docker compose --profile check run --rm checks

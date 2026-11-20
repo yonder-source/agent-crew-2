@@ -1,0 +1,4 @@
+services:
+  gateway:
+    volumes:
+      - ${AGENT_CREW_OPENCLAW_CONFIG_FILE:-../../../.local/openclaw-coding.json}:/app/extensions/agent-crew/openclaw.json:ro

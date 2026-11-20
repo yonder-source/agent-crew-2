@@ -52,7 +52,10 @@ function harness(initialSession = null) {
         return {};
       }
       if (method === "tools.invoke") return { ok: true, output: { details: {
-        ok: true, status: "ok", output: [{ runId: "run-7", status: codingStatus, text: codingText }],
+        ok: true, status: "ok", output: [{
+          runId: "run-7", status: codingStatus, text: codingText,
+          workspacePath, workspaceBranch: branch,
+        }],
       } } };
       throw new Error(`Unexpected method: ${method}`);
     },
@@ -99,6 +102,8 @@ assert.equal(invocation.params.sessionKey, "agent:main:main");
 const args = JSON.parse(invocation.params.args.argsJson);
 assert.equal(args.agentId, "coding");
 assert.equal(args.sessionKey, first.value.job.sessionKey);
+assert.equal(args.workspacePath, workspacePath);
+assert.equal(args.workspaceBranch, branch);
 assert.equal((await success.method("agent-crew.dispatch", issue)).value.job.jobId, first.value.job.jobId);
 assert.equal(success.calls.filter((call) => call.method === "tools.invoke").length, 1);
 

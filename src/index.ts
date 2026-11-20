@@ -300,6 +300,8 @@ export default definePluginEntry({
           workflowArgs = JSON.stringify({
             sessionKey: job.sessionKey,
             agentId: config.coding.agentId,
+            workspacePath: job.workspacePath ?? "",
+            workspaceBranch: job.workspaceBranch ?? "",
             prompt: [
               `Implement GitHub issue ${assignedIssue.repository}#${assignedIssue.number}.`,
               `Title: ${assignedIssue.title}`,
@@ -345,7 +347,9 @@ export default definePluginEntry({
           }
           if (typeof resultValue.runId !== "string" || !resultValue.runId ||
               typeof resultValue.status !== "string" || !resultValue.status ||
-              typeof resultValue.text !== "string" || resultValue.text.length > 16_000) {
+              typeof resultValue.text !== "string" || resultValue.text.length > 16_000 ||
+              resultValue.workspacePath !== job.workspacePath ||
+              resultValue.workspaceBranch !== job.workspaceBranch) {
             throw new Error("Coding result was invalid; operator inspection is required");
           }
           codingResult = resultValue;

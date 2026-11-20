@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 // Native validators establish schema validity; these assertions pin local intent.
 const read = (path) => JSON.parse(readFileSync(path, "utf8"));
 const compose = read(process.argv[2]);
-const config = read("openclaw.json");
+const config = read(process.argv[3] ?? "openclaw.json");
 const pkg = read("package.json");
 const dockerfile = readFileSync("Dockerfile", "utf8");
 function requireSetting(condition, message) {
@@ -67,6 +67,13 @@ function validate(model, settings, metadata = pkg) {
   assert.deepEqual(settings.agents.entries.coding.tools.alsoAllow,
     ["agent_crew_issue_read", "agent_crew_issue_update"]);
   assert.deepEqual(settings.agents.entries.coding.tools.deny, ["github_publish"]);
+  if (process.argv[3]) {
+    const crewConfig = settings.plugins.entries["agent-crew"].config;
+    assert.deepEqual(crewConfig.github, { repository: "owner/repo" });
+    assert.deepEqual(crewConfig.coding, {
+      agentId: "coding", repositoryPath: "/workspaces/repositories/owner/repo",
+    });
+  }
   const version = metadata.peerDependencies.openclaw;
   assert.equal(metadata.openclaw.compat.pluginApi, version, "Plugin API version mismatch");
   assert.equal(metadata.openclaw.build.openclawVersion, version, "Plugin build version mismatch");

@@ -1,0 +1,88 @@
+{
+  "gateway": {
+    "mode": "local",
+    "auth": {
+      "mode": "token",
+      "token": "${OPENCLAW_GATEWAY_TOKEN}"
+    }
+  },
+  "plugins": {
+    "load": {
+      "paths": [
+        "/app/extensions/agent-crew",
+        "/opt/agent-crew-lobster/node_modules/@openclaw/lobster"
+      ]
+    },
+    "allow": [
+      "agent-crew",
+      "lobster"
+    ],
+    "entries": {
+      "agent-crew": {
+        "enabled": true,
+        "config": {
+          "environment": "local-coding",
+          "github": {
+            "repository": "owner/repo"
+          },
+          "coding": {
+            "agentId": "coding",
+            "repositoryPath": "/workspaces/repositories/owner/repo"
+          }
+        }
+      },
+      "lobster": {
+        "enabled": true
+      }
+    }
+  },
+  "tools": {
+    "alsoAllow": [
+      "lobster"
+    ]
+  },
+  "agents": {
+    "defaults": {
+      "sandbox": {
+        "mode": "non-main",
+        "backend": "docker",
+        "scope": "session",
+        "workspaceAccess": "rw",
+        "docker": {
+          "network": "none",
+          "readOnlyRoot": true,
+          "capDrop": [
+            "ALL"
+          ]
+        }
+      }
+    },
+    "entries": {
+      "main": {},
+      "coding": {
+        "workspace": "/workspaces/repositories",
+        "tools": {
+          "alsoAllow": [
+            "agent_crew_issue_read",
+            "agent_crew_issue_update"
+          ],
+          "deny": [
+            "github_publish"
+          ],
+          "sandbox": {
+            "tools": {
+              "alsoAllow": [
+                "agent_crew_issue_read",
+                "agent_crew_issue_update"
+              ],
+              "deny": [
+                "github_publish"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "ownership": "explicit"
+  }
+}

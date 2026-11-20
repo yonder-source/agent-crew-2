@@ -113,3 +113,28 @@ file at `.local/secrets/github-app-installation-token`. The installation needs
 Issues read/write permission. WBS3 checks use deterministic fixtures unless a
 disposable GitHub repository and installation token are supplied; fixture
 results are not live GitHub qualification.
+
+## Local coding workflow
+
+The default Compose config stays credential-free for synthetic checks. To run
+the real coding workflow, copy
+`infra/local-dev/openclaw/openclaw.coding.example.json` to
+`.local/openclaw-coding.json`, then replace both `owner/repo` values with the
+same GitHub repository. Clone that repository to
+`.local/repositories/owner/repo`; the in-container path is
+`/workspaces/repositories/owner/repo`. Put the pre-provisioned GitHub App
+installation token at `.local/secrets/github-app-installation-token`.
+The Gateway's normal OpenClaw auth store must also contain valid credentials for
+the configured coding model; the example does not provision model credentials.
+
+Build the sandbox image and start the coding configuration with:
+
+```sh
+docker build --target sandbox -t openclaw-sandbox:bookworm-slim .
+docker compose -f infra/local-dev/openclaw/compose.yaml -f infra/local-dev/openclaw/compose.coding.yaml -f infra/local-dev/openclaw/compose.github.yaml up -d --build gateway
+```
+
+The `coding` overlay mounts the local config read-only; `compose.github.yaml`
+mounts the token as a Gateway secret. Never put token values in the config
+file. Stop and remove the disposable runtime with the same Compose files and
+`down` when finished.
