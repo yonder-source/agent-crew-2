@@ -33,7 +33,7 @@ const syntaxRestrictions = [
 ];
 
 export default defineConfig([
-  { ignores: ["dist/**", "node_modules/**"] },
+  { ignores: ["dist/**", "node_modules/**", ".local/**"] },
   {
     files: ["**/*.{js,cjs,mjs,ts,cts,mts}"],
     extends: [js.configs.recommended],
@@ -50,6 +50,7 @@ export default defineConfig([
   ...[
     ["scripts/check-lint.mjs", "spawnSync"],
     ["scripts/check-config.mjs", "spawnSync"],
+    ["scripts/check-setup-draft.mjs", "spawnSync"],
     ["scripts/check-gateway.mjs", "spawnSync"],
     ["scripts/session-roundtrip.mjs", "spawnSync"],
     ["scripts/check-dispatcher.mjs", "execFile"],
@@ -64,6 +65,10 @@ export default defineConfig([
       ]),
     },
   })),
+  {
+    files: ["ui/**/*.js"],
+    languageOptions: { globals: globals.browser },
+  },
   {
     // The mock boundary harness runs compiled dispatcher code in a VM.
     files: ["scripts/check-dispatcher-boundaries.mjs", "scripts/check-coding-boundaries.mjs"],

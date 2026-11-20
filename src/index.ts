@@ -14,6 +14,31 @@ const WORKFLOW_STATUSES = ["ok", "needs_approval", "needs_input", "cancelled"] a
 type JobStatus = typeof JOB_STATUSES[number];
 type WorkflowStatus = typeof WORKFLOW_STATUSES[number];
 const LOCKED = new Set(["starting", "active", "completed", "needs-inspection", "abandoned"]);
+const DRAFT_FIELDS = [
+  "githubAppId", "repository", "repositoryPath", "codingAgentId", "designerAgentId",
+  "codingChannelId", "designerChannelId", "codingUserIds", "designerUserIds", "tokenBudget",
+] as const;
+type SetupDraft = Record<typeof DRAFT_FIELDS[number], string>;
+
+function parseSetupDraft(value: unknown): SetupDraft {
+  if (!isRecord(value) || Object.keys(value).length !== DRAFT_FIELDS.length) {
+    throw new Error("Invalid setup draft");
+  }
+  const { githubAppId, repository, repositoryPath, codingAgentId, designerAgentId,
+    codingChannelId, designerChannelId, codingUserIds, designerUserIds, tokenBudget } = value;
+  if (typeof githubAppId !== "string" || typeof repository !== "string" ||
+      typeof repositoryPath !== "string" || typeof codingAgentId !== "string" ||
+      typeof designerAgentId !== "string" || typeof codingChannelId !== "string" ||
+      typeof designerChannelId !== "string" || typeof codingUserIds !== "string" ||
+      typeof designerUserIds !== "string" || typeof tokenBudget !== "string" ||
+      DRAFT_FIELDS.some((field) => typeof value[field] !== "string" || value[field].length > 1024)) {
+    throw new Error("Invalid setup draft");
+  }
+  return {
+    githubAppId, repository, repositoryPath, codingAgentId, designerAgentId,
+    codingChannelId, designerChannelId, codingUserIds, designerUserIds, tokenBudget,
+  };
+}
 
 function isJobStatus(value: unknown): value is JobStatus {
   return JOB_STATUSES.some((status) => status === value);
@@ -397,6 +422,40 @@ export default definePluginEntry({
       },
     };
     api.registerTool(statusTool);
+
+    // A draft is not an active configuration and cannot initiate a restart.
+    api.registerGatewayMethod("agent-crew.setup.draft.get", async ({ respond }) => {
+      try {
+        const store = api.runtime.state.openKeyedStoreV2<SetupDraft>({
+          namespace: "setup-draft", retention: "retained",
+        });
+        const value = await store.lookup("current");
+        respond(true, {
+          draft: value === undefined ? null : parseSetupDraft(value),
+          current: {
+            repository: config.github?.repository ?? "",
+            repositoryPath: config.coding?.repositoryPath ?? "",
+            codingAgentId: config.coding?.agentId ?? "",
+          },
+        });
+      } catch {
+        respond(false, undefined, { code: "SETUP_DRAFT_UNAVAILABLE", message: "Setup draft is unavailable" });
+      }
+    }, { scope: "operator.admin" });
+
+    api.registerGatewayMethod("agent-crew.setup.draft.save", async ({ params, respond }) => {
+      try {
+        if (!isRecord(params)) throw new Error("Invalid setup draft");
+        const draft = parseSetupDraft(params.draft);
+        const store = api.runtime.state.openKeyedStoreV2<SetupDraft>({
+          namespace: "setup-draft", retention: "retained",
+        });
+        await store.register("current", draft);
+        respond(true, { saved: true });
+      } catch {
+        respond(false, undefined, { code: "SETUP_DRAFT_SAVE_FAILED", message: "Setup draft could not be saved" });
+      }
+    }, { scope: "operator.admin" });
 
     api.registerGatewayMethod("agent-crew.dispatch", async ({ params, respond }) => {
       try {

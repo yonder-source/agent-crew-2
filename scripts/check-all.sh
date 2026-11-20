@@ -52,8 +52,10 @@ docker compose up -d --force-recreate gateway
 wait_for_gateway
 
 docker compose exec -T gateway sh -lc 'node scripts/check-gateway.mjs && node scripts/session-roundtrip.mjs'
+docker compose exec -T gateway node scripts/check-setup-draft.mjs
 docker compose restart gateway
 wait_for_gateway
 docker compose exec -T gateway node scripts/session-roundtrip.mjs --verify-only
+docker compose exec -T gateway node scripts/check-setup-draft.mjs --verify-only
 
 node scripts/check-dispatcher.mjs

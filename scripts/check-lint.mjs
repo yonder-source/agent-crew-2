@@ -14,7 +14,7 @@ async function verifyCoverage(sourceRoot, lintRoot = root) {
     for (const entry of readdirSync(join(sourceRoot, directory), { withFileTypes: true })) {
       const file = join(directory, entry.name);
       if (entry.isDirectory()) {
-        if (entry.name !== "node_modules" && !["dist", ".git", ".openclaw"].includes(file)) directories.push(file);
+        if (entry.name !== "node_modules" && !["dist", ".git", ".openclaw", ".local"].includes(file)) directories.push(file);
       } else if (/\.(?:[cm]?[jt]s)$/.test(entry.name) && statSync(join(sourceRoot, file)).isFile()) {
         expectedFiles.push(file);
       }
@@ -40,6 +40,8 @@ try {
       writeFileSync(join(directory, file), 'console.log("covered");');
     }
   }
+  mkdirSync(join(source, ".local/skills/example"), { recursive: true });
+  writeFileSync(join(source, ".local/skills/example/private.js"), "invalidLocalSkill();");
   await verifyCoverage(source, copied);
   for (const file of files) {
     rmSync(join(copied, file));
@@ -57,7 +59,7 @@ for (const rule of ["no-unsafe-type-assertion", "no-floating-promises", "no-misu
 }
 for (const file of [
   "src/config.mjs", "src/config.d.mts", "eslint.config.mjs",
-  "scripts/check-config.mjs", "scripts/check-dispatcher-boundaries.mjs",
+  "scripts/check-config.mjs", "scripts/check-setup-draft.mjs", "scripts/check-dispatcher-boundaries.mjs",
   "scripts/check-dispatcher.mjs", "scripts/check-gateway.mjs",
   "scripts/session-roundtrip.mjs", "scripts/check-lint.mjs",
   "scripts/check-deployment.mjs",
@@ -149,6 +151,7 @@ try {
     ...[
       ["scripts/check-lint.mjs", "spawnSync"],
       ["scripts/check-config.mjs", "spawnSync"],
+      ["scripts/check-setup-draft.mjs", "spawnSync"],
       ["scripts/check-gateway.mjs", "spawnSync"],
       ["scripts/session-roundtrip.mjs", "spawnSync"],
       ["scripts/check-dispatcher.mjs", "execFile"],

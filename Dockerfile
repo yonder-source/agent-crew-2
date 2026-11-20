@@ -26,6 +26,7 @@ RUN npm ci --include=dev --legacy-peer-deps --ignore-scripts --no-audit --no-fun
 COPY --chown=node:node openclaw.plugin.json tsconfig.json ./
 COPY --chown=node:node src ./src
 RUN npm run build
+COPY --chown=node:node ui ./dist/control-ui/agent-crew
 
 FROM build AS checks
 COPY --chown=node:node . ./
@@ -40,6 +41,6 @@ COPY --from=build --chown=node:node /app/extensions/agent-crew/dist ./dist
 COPY --from=build --chown=node:node /app/extensions/agent-crew/node_modules ./node_modules
 COPY --chown=node:node package.json openclaw.plugin.json openclaw.json ./
 COPY --chown=node:node infra/local-dev/openclaw/workflows ./workflows
-COPY --chown=node:node scripts/check-gateway.mjs scripts/session-roundtrip.mjs ./scripts/
+COPY --chown=node:node scripts/check-gateway.mjs scripts/session-roundtrip.mjs scripts/check-setup-draft.mjs ./scripts/
 USER node
 CMD ["openclaw", "gateway", "--allow-unconfigured"]

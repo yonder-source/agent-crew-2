@@ -4,6 +4,11 @@
   "description": "Agent Crew GitHub issue discovery and assigned issue access",
   "version": "0.1.0",
   "kind": "plugin",
+  "uiCapabilities": ["page", "navigation"],
+  "controlUi": {
+    "entry": "dist/control-ui/agent-crew/setup.js",
+    "styles": ["dist/control-ui/agent-crew/setup.css"]
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
