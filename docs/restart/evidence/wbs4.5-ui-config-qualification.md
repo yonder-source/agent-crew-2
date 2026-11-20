@@ -347,3 +347,53 @@ WBS4 workflow invocation defect; full coding acceptance is not achieved.
 A read-only tools.effective snapshot also did not list agent_crew_issue_read or
 agent_crew_issue_update in the session's plugin inventory; this does not prove
 model-visible tool delivery and remains with the separate visibility investigation.
+
+
+### Coding workflow parameter repair — 2026-11-20
+
+A retained native-Lobster regression (`scripts/check-coding-workflow.mjs`) failed
+against the deployed workflow with the exact timeout error. The workflow now
+uses a shell command step invoking the pinned `openclaw agent --json` CLI with
+quoted environment arguments, using Lobster's actual camelCase normalization
+(`AGENTID`, `SESSIONKEY`, `TIMEOUTSECONDS`, `WORKSPACEPATH`, `WORKSPACEBRANCH`).
+The result command invokes Node directly; `exec --json` was pipeline syntax and
+was invalid in a command step. The existing host-controlled
+LOBSTER_OPENCLAW_BIN override is retained for isolated fake-CLI qualification.
+
+The native regression checks every CLI argument, preserves multiline issue text
+with quotes, command substitutions and pipeline characters, verifies no injected
+command executes, and validates the parsed coding result's assigned workspace.
+It uses native Lobster with a fake CLI, not model/GitHub acceptance. It runs in
+the checks image and creates its runtime-layout fixture under a temporary path,
+keeping lint source-input coverage unchanged.
+
+Restart also exposed a recovery deadlock: App-mode startup pauses polling when
+retained tasks need inspection, but dispatch previously required polling to be
+ready even after an operator approved retry. Operator dispatch can now resume
+only that approved retry while polling is paused; it still rejects pending or
+uncertain configuration activation, checks the full task inventory for active
+or uncertain runs and verifies the original workspace/base binding. Discovery
+cannot use this exception. Fixtures cover a paused restart, refusal before
+approval, rejection of an active run, and successful reuse without session creation.
+
+
+All pinned checks passed after the workflow/retry repairs, including native
+Lobster fake-CLI argument/result qualification and the retained Git regressions.
+The persistent Gateway was recreated only after confirming all six sessions had
+no active run. It became healthy. Operator resolution approved retry of #1 with
+an inspection note confirming the previous attempt had failed before coding;
+operator dispatch reused the original workspace/base. A subsequent sessions.list
+confirmed the bound coding session had hasActiveRun=true and a new sibling
+sandbox existed. This establishes real coding-turn admission past timeout parsing;
+final coding result remains to be observed.
+
+
+The real turn completed successfully through Lobster result parsing and Controller
+metadata. Job `b940f8b3-0233-4b6e-8fe4-33cc13de9e92` retained coding run
+`373ad858-6fd7-485d-bf12-b79969d06bcf`, workflowStatus=ok,
+codingRunStatus=ok and status=completed. The original worktree contains the
+untracked `docs/qgroundcontrol-extension-practice-plan.md`; no push/PR was done.
+The agent reported official-source lookup failed due DNS/network isolation and
+marked its document unverified. Thus the actual model execution/result handoff
+passed, but the issue's research/content acceptance did not. A successful turn
+status does not establish document/source validation or publication readiness.

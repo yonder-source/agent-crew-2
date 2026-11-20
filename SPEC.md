@@ -257,7 +257,8 @@ assigned issue session a distinct checkout from the configured repository
 source. The session worktree is the coding artifact; WBS4 returns its path,
 branch, agent run ID, run status and validation summary through Lobster. WBS4
 does not push or create a pull request; WBS5 owns publication. Pass issue data
-as Lobster workflow arguments to `openclaw.agent`, and re-read the issue before
+as Lobster workflow arguments to the pinned `openclaw agent` CLI through
+quoted workflow environment variables, and re-read the issue before
 starting to ensure it remains open and labeled `ready for agent`.
 
 Before each new task, the Controller updates the source checkout from remote
@@ -306,7 +307,11 @@ or credentials through this mount. Installing or removing skills through a UI
 is a later decision.
 
 Coding run timeout or malformed/uncertain result remains `needs-inspection` and
-blocks automatic retry. A GitHub-enabled plugin configuration requires one configured local
+blocks automatic retry. An explicit operator-approved retry may be dispatched
+while polling is paused after restart, only after confirming the retained task
+has no active run and revalidating its repository/worktree/base binding. Apply
+and uncertain configuration activation still block retry admission.
+A GitHub-enabled plugin configuration requires one configured local
 repository checkout path corresponding to the configured GitHub repository.
 
 ## Later scope

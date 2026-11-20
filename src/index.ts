@@ -286,7 +286,8 @@ export default definePluginEntry({
       };
     };
 
-    const assertNoActiveCodingTasks = async (): Promise<void> => {
+    const assertNoActiveCodingTasks = async (approvedRetryJobId?: string): Promise<void> => {
+      let approvedRetryFound = false;
       const response: unknown = await call("sessions.list", { archived: "all", limit: 5000 });
       if (!isRecord(response) || !Array.isArray(response.sessions) || response.sessions.length >= 5000) {
         throw new Error("Coding task inventory is incomplete; repository checkout is blocked.");
@@ -324,10 +325,15 @@ export default definePluginEntry({
           throw new Error("Coding task state is uncertain; repository checkout is blocked.");
         }
         const job = jobValue;
-        if (["starting", "active", "needs-inspection", "retry-approved"].includes(job.status) ||
+        const approvedRetry = job.status === "retry-approved" && job.jobId === approvedRetryJobId;
+        if (approvedRetry) approvedRetryFound = true;
+        if ((!approvedRetry && ["starting", "active", "needs-inspection", "retry-approved"].includes(job.status)) ||
             (job.issueUpdate !== undefined && ["writing", "needs-inspection", "retry-approved", "abandoned"].includes(job.issueUpdate.status))) {
           throw new Error("An Agent Crew coding task is active or uncertain; repository checkout is blocked.");
         }
+      }
+      if (approvedRetryJobId !== undefined && !approvedRetryFound) {
+        throw new Error("Approved retry is missing from the task inventory; inspect before resuming.");
       }
     };
 
@@ -340,16 +346,21 @@ export default definePluginEntry({
       updatedAt: new Date().toISOString(),
     });
 
-    const dispatchIssue = (issue: Issue): Promise<Job> => {
+    const dispatchIssue = (issue: Issue, operatorRetry = false): Promise<Job> => {
       const requestedEpoch = admissionEpoch;
       const admissionWasOpen = !setupApplying && pollingReady;
       pendingDispatches += 1;
       return serialize(async () => {
-      if (!admissionWasOpen || setupApplying || !pollingReady || requestedEpoch !== admissionEpoch) {
+      if (setupApplying || activationPending || pollingInspectionRequired || requestedEpoch !== admissionEpoch) {
         throw new Error("Issue admission is paused while repository settings are being applied.");
       }
       const session = describe(issue);
       const existing = await readJob(issue, session);
+      const approvedRetry = operatorRetry && existing?.status === "retry-approved";
+      if ((!admissionWasOpen || !pollingReady) && !approvedRetry) {
+        throw new Error("Issue admission is paused while repository settings are being applied.");
+      }
+      if (approvedRetry && config.coding) await assertNoActiveCodingTasks(existing.jobId);
       if (existing && LOCKED.has(existing.status)) return existing;
       let workspace: { path: string; branch: string } | undefined;
       let baseCommit = existing?.baseCommit;
@@ -734,7 +745,7 @@ export default definePluginEntry({
         if (!params || typeof params !== "object" || Array.isArray(params)) throw new Error("dispatch parameters are required");
         const values = params as { repository?: unknown; issueNumber?: unknown };
         const issue = parseIssue(values.repository, values.issueNumber);
-        const job = publicJob(await dispatchIssue(issue));
+        const job = publicJob(await dispatchIssue(issue, true));
         respond(true, { status: job.status, job });
       } catch (error) {
         respond(false, undefined, {

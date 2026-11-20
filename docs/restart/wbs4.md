@@ -51,7 +51,7 @@ end-to-end run; the earlier container inspection is not that qualification.
 
 ## 4.2 Start the coding agent
 
-**Work:** Connect the Lobster workflow to `openclaw.agent` using the issue
+**Work:** Connect the Lobster command step to the pinned `openclaw agent` CLI using the issue
 session's managed worktree and WBS3 issue data. Pass issue content as workflow
 arguments, not shell command text. The target is a 20-minute coding active-time
 limit that excludes waiting for human instructions; WBS4.5 qualifies runtime

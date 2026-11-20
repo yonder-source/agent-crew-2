@@ -16,7 +16,7 @@ const repositoryPath = "/workspaces/repositories/owner/repo";
 const workspacePath = "/home/node/.openclaw/worktrees/fixture/issue-7";
 const branch = "openclaw/agent-crew-issue-7";
 
-function harness(initialSession = null) {
+function harness(initialSession = null, appMode = false) {
   let session = initialSession;
   let codingStatus = "ok";
   let codingText = "Changed README; validation passed";
@@ -51,7 +51,7 @@ function harness(initialSession = null) {
     },
     IssueDiscovery,
     parseConfig: () => ({
-      environment: "test", github: { repository: "owner/repo", pollIntervalMs: 60_000 },
+      environment: "test", github: { repository: "owner/repo", pollIntervalMs: 60_000, ...(appMode ? { appId: "123", installationId: 17 } : {}) },
       coding: { agentId: "coding", repositoryPath },
     }),
     definePluginEntry: (entry) => entry,
@@ -171,6 +171,19 @@ const resumed = await orphan.method("agent-crew.dispatch", issue);
 assert.equal(resumed.ok, false);
 assert.equal(orphan.calls.filter((call) => call.method === "sessions.create").length, 0);
 assert.equal(orphan.calls.filter((call) => call.method === "tools.invoke").length, 0);
+
+// A post-restart operator-approved retry can run while discovery is paused.
+const recovered = harness(failed.session(), true);
+recovered.setInventory({ sessions: [{ key: failure.value.job.sessionKey, hasActiveRun: false }] });
+assert.equal((await recovered.method("agent-crew.dispatch", issue)).ok, false);
+assert.equal((await recovered.method("agent-crew.resolve", {
+  ...issue, decision: "retry", note: "Confirmed prior failure stopped before retry",
+})).ok, true);
+recovered.setInventory({ sessions: [{ key: failure.value.job.sessionKey, hasActiveRun: true }] });
+assert.equal((await recovered.method("agent-crew.dispatch", issue)).ok, false);
+recovered.setInventory({ sessions: [{ key: failure.value.job.sessionKey, hasActiveRun: false }] });
+assert.equal((await recovered.method("agent-crew.dispatch", issue)).value.job.status, "completed");
+assert.equal(recovered.calls.filter(call => call.method === "sessions.create").length, 0);
 
 const setup = harness();
 const cloneParams = { appId: "123", installationId: 17, repository: "owner/repo", repositoryPath };

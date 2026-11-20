@@ -55,6 +55,7 @@ export default defineConfig([
     ["scripts/session-roundtrip.mjs", "spawnSync"],
     ["scripts/check-dispatcher.mjs", "execFile"],
     ["scripts/check-repository-connection.mjs", "spawnSync"],
+    ["scripts/check-coding-workflow.mjs", "spawnSync"],
   ].map(([file, allowed]) => ({
     files: [file],
     rules: {
