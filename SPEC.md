@@ -40,23 +40,84 @@ small OpenClaw integration; it does not implement this workflow.
   metadata persistence, not a completed production workflow.
 - Start with OpenClaw's Docker sandbox for coding and validate its writable
   workspace. Revisit privileged supervision if the chosen runtime needs it.
-- Start with a 20-minute timeout for each Lobster call and coding-agent step;
-  adjust after observing actual runs. A pause for human input ends the current
-  Lobster call; the next resume is a separate call.
+- Start with a 20-minute active-execution limit for each coding task. Time spent
+  stopped waiting for human instructions does not count toward that limit.
+  Lobster call deadlines must allow this policy: a pause for human input ends the
+  current call, and the next resume is a separate call. Qualify how the pinned
+  runtime exposes waiting and resumption before implementing the timer.
 
 ## Repository connection UI
 
-[WBS5.5](docs/restart/wbs5.5.md), between draft PR publication and Slack
-integration, delivers a required single-repository connection screen accessible
+[WBS4.5](docs/restart/wbs4.5.md), between coding execution and draft PR
+publication, delivers a required single-repository connection screen accessible
 from OpenClaw. An authenticated operator can configure the GitHub repository
 and matching checkout without editing JSON, inspect credential availability,
 validate access and save the connection using the existing configuration store.
 Keep secret values out of UI responses. Configuration must survive restart;
 report any restart needed to apply changes. Prevent connection changes from
-redirecting active or uncertain work. Reuse supported OpenClaw UI/configuration
-facilities; qualify the pinned runtime's extension support before choosing the
-integration. WBS6 end-to-end acceptance begins with this screen. Multi-repository
-management and credential provisioning are outside this UI package.
+redirecting active or uncertain work. The screen accepts a GitHub App ID and
+lets the operator select one repository from the App's installed repositories,
+then configure its matching checkout and the existing coding agent ID setting.
+Pre-fill the repository source path and offer configured agents in a dropdown,
+defaulting to `coding` when available. Show individual validation results and
+failures alongside connection status, and save feedback near the save action.
+Compare the source checkout's Git remote with the selected repository; distinguish
+granted App permissions from confirmed write outcomes. Authenticated
+operator authorization is required for reads, validation and changes; assigned
+coding agents cannot invoke these operations. Save stores a pending draft without
+changing the running configuration, including while work is active. Apply checks
+for active or uncertain work and blocks connection changes while it exists. After
+the check, stop automatic polling and new admission while preparing the source
+checkout and applying the configuration; preserve the last valid configuration on
+failure. After restart, resume polling automatically only when the Gateway is
+healthy and the connection and job state are safe. Provide an operator control
+to restart polling manually subject to the same checks, with its status and any
+blocking reason visible. An operator
+may choose to force a Gateway restart despite active work. A restart does not
+establish that an interrupted coding agent has stopped: retain uncertain state
+until operator inspection and explicit resolution, and do not redirect that work
+to a new connection. Report any restart needed to activate saved settings.
+Repository read access is distinct from push, issue-write and PR capabilities;
+report unverified write capabilities until live write qualification. WBS4.5
+also plans and delivers GitHub App installation token issuance and renewal for
+unattended operation. Keep App credentials with the Controller in the existing
+secret delivery mechanism, and never expose secret values to the UI or coding
+agents. Qualify the issuance and renewal mechanism, expiry and failure handling,
+and repository-scoped permissions before selecting its implementation. Reuse
+supported OpenClaw UI/configuration facilities; qualify the pinned runtime's
+extension support before choosing the integration. WBS4.5 validates the UI,
+connection persistence, access checks and coding sandbox Git operations; WBS5
+validates coding through draft PR publication, and WBS6 validates the full MVP
+including Slack. Multi-repository management and creation or installation of the
+GitHub App are outside this package.
+
+### Coding interaction and budgets
+
+WBS4.5 provides basic Slack Socket Mode setup and coding-task interaction.
+Configure separate coding and designer agents, Slack channel IDs and authorized
+Slack user IDs; designer execution remains later scope. Store Slack credentials
+as mounted secrets and show their availability without returning secret values.
+Each coding task uses a bound thread. Status updates and requests for human input
+are distinct operations: only a confirmed transition to waiting stops the task's
+active-time clock. Accept the first authorized reply in the bound thread and
+resume the same session and worktree; additional replies while running receive a
+busy response, not steering. Persist the binding, waiting state and elapsed
+active time across Gateway restart; check that the connection, agent and channel
+remain compatible before resuming. Replies while the Gateway is offline must be
+resent after it is healthy. A waiting task blocks incompatible configuration
+changes. Failed delivery is visible and leaves the task waiting; WBS6 adds up to
+three retries after the first attempt, accepting possible duplicates when delivery
+is uncertain. Designer workflow and skill-management UI remain later scope.
+
+Apply a shared configurable per-task token budget, accumulating usage across
+coding turns, resumption, model retries and compaction to the extent reliably
+reported by the pinned runtime and provider. Expose the budget and task usage.
+Unknown usage must not count as zero: pause for operator inspection. At the
+20-minute active-time or token limit, stop further execution and require operator
+inspection; do not automatically continue with a new agent. If a run is
+interrupted and its stopped state or elapsed usage is uncertain, retain the
+inspection boundary. Qualify the runtime's usage and stop behavior, including
+potential overshoot during an in-flight model request; this is not a billing cap.
 
 ## WBS2 dispatcher
 
@@ -139,16 +200,19 @@ separately from fixture results.
 | <a id="error-workflow"></a>Coding or publication fails | Show the failure in the result or workflow status. | [4.3](docs/restart/wbs4.md#43-return-the-coding-result), [5.4](docs/restart/wbs5.md#54-return-the-publication-result), [6.3](docs/restart/wbs6.md#63-report-the-draft-pr) |
 | <a id="error-slack"></a>Slack delivery fails | Show the delivery failure without misrepresenting the workflow or publication outcome. | [6.2](docs/restart/wbs6.md#62-connect-slack-reporting) |
 
-<a id="error-timeout"></a>Each Lobster call and coding-agent step starts with a
-20-minute timeout ([WBS4.2](docs/restart/wbs4.md#42-start-the-coding-agent)). A timeout may
+<a id="error-timeout"></a>Each coding task starts with a 20-minute active-execution
+limit; waiting for human instructions is excluded ([WBS4.2](docs/restart/wbs4.md#42-start-the-coding-agent)).
+Lobster call deadlines must not cut that active budget short. A timeout may
 leave an uncertain outcome. Verify inspection behavior before unattended
 production use. Automatic retry policy for confirmed failures is not yet
 defined; automatic recovery and reconciliation are later decisions.
 
 ## Deployment and credentials
 
-Use Docker Compose secrets on encrypted host storage for local development and
-personal use. In production, use the cloud provider's secret manager; secrets
+Use a Docker Compose secret sourced from `.local/secrets/agent-crew.pem` for the
+GitHub App private key in local personal use, mounted at a fixed Gateway secret
+path. Restrict host file access and keep it out of Git and the Docker build
+context. In production, use the cloud provider's secret manager; secrets
 must be encrypted at rest. OpenClaw can resolve platform-injected environment
 values through SecretRef. Before production use, verify the selected secret
 manager's delivery path into each consumer and document the references and
@@ -180,6 +244,14 @@ does not push or create a pull request; WBS5 owns publication. Pass issue data
 as Lobster workflow arguments to `openclaw.agent`, and re-read the issue before
 starting to ensure it remains open and labeled `ready for agent`.
 
+Before each new task, the Controller updates the source checkout from remote
+`main` and creates the task's `feat/` branch and worktree from that updated base.
+Stop and report the reason if the checkout is dirty, local and remote `main`
+have diverged, remote `main` is missing, or the update fails; never overwrite
+local changes or automatically merge divergent histories.
+Qualify this behavior together with Git operations and isolation inside the
+coding sandbox through the WBS4.5 integration check.
+
 Configure the OpenClaw Docker sandbox for non-main coding sessions with
 writable worktrees, a read-only container root, dropped capabilities and no
 network egress. Run Lobster from the unsandboxed main controller session and
@@ -194,9 +266,15 @@ pinned `sandbox` Dockerfile target as `openclaw-sandbox:bookworm-slim` before
 starting coding turns. The Gateway image includes a Docker CLI and joins the
 host Docker socket group.
 
+WBS4.5 makes skills in the host's `.local/skills` available read-only to each
+coding sandbox alongside its assigned worktree. Qualify the pinned runtime's
+skill discovery and sandbox access, including compatibility of the intended
+skills and any required supporting files. Do not expose other host directories
+or credentials through this mount. Installing or removing skills through a UI
+is a later decision.
+
 Coding run timeout or malformed/uncertain result remains `needs-inspection` and
-blocks automatic retry. The initial Lobster and coding-agent deadline is 20
-minutes. A GitHub-enabled plugin configuration requires one configured local
+blocks automatic retry. A GitHub-enabled plugin configuration requires one configured local
 repository checkout path corresponding to the configured GitHub repository.
 
 ## Later scope

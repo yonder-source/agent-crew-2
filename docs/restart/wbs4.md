@@ -44,13 +44,16 @@ image as part of its disposable validation.
 worktrees from the configured repository. Verify that sandbox containers have
 no Gateway secret mounts or Docker socket, use a read-only container root,
 drop Linux capabilities and have no network egress. Document the local setup.
+Qualify sandbox Git operations and task isolation in the WBS4.5 disposable
+end-to-end run; the earlier container inspection is not that qualification.
 
 ## 4.2 Start the coding agent
 
 **Work:** Connect the Lobster workflow to `openclaw.agent` using the issue
 session's managed worktree and WBS3 issue data. Pass issue content as workflow
-arguments, not shell command text. Start with a 20-minute timeout for the Lobster
-call and coding-agent step.
+arguments, not shell command text. The target is a 20-minute coding active-time
+limit that excludes waiting for human instructions; WBS4.5 qualifies runtime
+support and implements the timing policy.
 See [timeouts](../../SPEC.md#error-timeout).
 
 **Done when:** A ready test issue starts one coding turn in its assigned
@@ -91,8 +94,9 @@ The handoff identifies the assigned issue and the source of the resulting change
 
 ## Handoff
 
-The next slice accepts this session-bound worktree result for Controller-mediated
-draft PR publication. Slack reporting follows the MVP workflow. Custom metering,
+[WBS4.5](wbs4.5.md) provides repository connection and Git authentication;
+WBS5 accepts this session-bound worktree result for Controller-mediated draft PR
+publication. WBS4.5 adds basic Slack interaction and task usage limits; custom metering,
 checkpoint/restore and automatic interruption recovery remain for later review.
 
 ## Current qualification limit

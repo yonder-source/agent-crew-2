@@ -8,10 +8,10 @@ The [root SPEC](../../SPEC.md) defines the MVP workflow.
 
 ## Entry conditions
 
-- [WBS4-restart](wbs4.md) is complete: a real coding run produces a change and
-  returns its result through Lobster.
-- A disposable GitHub test repository and scoped publication credential are
-  available. Supply the credential through the agreed secret mechanism.
+- [WBS4.5](wbs4.5.md) provides the repository connection and GitHub App
+  authentication and qualifies coding sandbox Git operations.
+- A disposable GitHub test repository is connected with permissions for
+  publication.
 
 ## 5.1 Accept the coding result
 
@@ -56,16 +56,16 @@ See [workflow failures](../../SPEC.md#error-workflow).
 
 ## 5.5 Validate publication and hand off
 
-**Work:** Run a small WBS4 coding task through publication in the disposable
-GitHub repository. Document how to repeat the check and inspect its result.
+**Work:** Verify the publication handoff and failure boundaries with fixtures.
+Run a disposable issue through the configured connection, sandbox coding and
+draft PR publication. Document how to repeat the check and inspect its result.
 
-**Done when:** A human can inspect the resulting draft PR, its assigned issue
-and the coding change. Record the outcome of the real GitHub test separately
-from fixture checks.
+**Done when:** Fixture checks cover result delivery, publication and inspection
+boundaries. A human can inspect the draft PR, assigned issue and coding change;
+record live GitHub qualification separately from fixture checks.
 
 ## Handoff
 
-[WBS5.5](wbs5.5.md) provides the repository connection UI using the settings
-and permissions established here. WBS6 then reports the PR result through Slack and leaves review and
+[WBS6](wbs6.md) reports the PR result through Slack and leaves review and
 merge to a human. Automated repair, detailed check/review evidence processing
 and automatic reconciliation of uncertain writes remain for later review.
