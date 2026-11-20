@@ -27,6 +27,19 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+wait_for_gateway() {
+  attempt=0
+  until docker compose exec -T gateway openclaw gateway health --port 18789 --token disposable-agent-crew-token >/dev/null 2>&1; do
+    attempt=$((attempt + 1))
+    if [ "$attempt" -ge 180 ]; then
+      docker compose ps -a
+      docker compose logs gateway
+      return 1
+    fi
+    sleep 1
+  done
+}
+
 docker compose --profile check config --format json > "$deployment_model"
 node scripts/check-deployment.mjs "$deployment_model"
 docker compose -f "$COMPOSE_FILE" -f infra/local-dev/openclaw/compose.coding.yaml --profile check config --format json > "$coding_deployment_model"
@@ -34,30 +47,12 @@ node scripts/check-deployment.mjs "$coding_deployment_model" infra/local-dev/ope
 docker build --target sandbox -t openclaw-sandbox:bookworm-slim .
 docker compose --profile check build
 docker compose --profile check run --rm checks
-docker compose up -d --force-recreate --wait --wait-timeout 300 gateway
-
-attempt=0
-until docker compose exec -T gateway openclaw gateway health --port 18789 --token disposable-agent-crew-token >/dev/null 2>&1; do
-  attempt=$((attempt + 1))
-  if [ "$attempt" -ge 60 ]; then
-    docker compose logs gateway
-    exit 1
-  fi
-  sleep 1
-done
+docker compose up -d --force-recreate gateway
+wait_for_gateway
 
 docker compose exec -T gateway sh -lc 'node scripts/check-gateway.mjs && node scripts/session-roundtrip.mjs'
 docker compose restart gateway
-docker compose up -d --wait --wait-timeout 300 gateway
-attempt=0
-until docker compose exec -T gateway openclaw gateway health --port 18789 --token disposable-agent-crew-token >/dev/null 2>&1; do
-  attempt=$((attempt + 1))
-  if [ "$attempt" -ge 60 ]; then
-    docker compose logs gateway
-    exit 1
-  fi
-  sleep 1
-done
+wait_for_gateway
 docker compose exec -T gateway node scripts/session-roundtrip.mjs --verify-only
 
 node scripts/check-dispatcher.mjs
