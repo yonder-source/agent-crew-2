@@ -14,6 +14,10 @@ ESLint `10.15.0`, typescript-eslint `8.73.0`, `@eslint/js` `10.0.1` and
 installation is skipped. The build restores SDK declarations from the matching
 npm release (the runtime image omits them). Typechecking uses those declarations,
 without local SDK stubs.
+The build applies a source-hash-guarded startup patch for this pinned runtime:
+model publication supersession enters the existing bounded agent-startup retry
+instead of leaving a healthy agent database unavailable. See the
+[diagnosis and native verification](docs/restart/evidence/gateway-startup-publication-race.md).
 Build tools, restored declarations and plugin sources stay in the separate checks
 image; the Gateway image receives compiled plugin output and runtime files only.
 

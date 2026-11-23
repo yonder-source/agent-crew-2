@@ -229,6 +229,12 @@ defined; automatic recovery and reconciliation are later decisions.
 
 ## Deployment and credentials
 
+The pinned OpenClaw runtime needs a guarded compatibility patch so model-runtime
+publication supersession during agent startup uses its existing bounded startup
+retry. Preserve database admission checks and propagate other failures; do not
+reset agent data to recover from this runtime race. Review the patch when the
+upstream bundle changes.
+
 Use a Docker Compose secret sourced from `.local/secrets/agent-crew.pem` for the
 GitHub App private key in local personal use, mounted at a fixed Gateway secret
 path. Restrict host file access and keep it out of Git and the Docker build

@@ -7,6 +7,8 @@ FROM openclaw-upstream AS sandbox
 FROM openclaw-upstream AS base
 USER root
 RUN npm install --prefix /opt/agent-crew-lobster --omit=dev --ignore-scripts @openclaw/lobster@2026.11.3
+COPY scripts/patch-openclaw-startup.mjs /opt/agent-crew-patches/patch-openclaw-startup.mjs
+RUN node /opt/agent-crew-patches/patch-openclaw-startup.mjs
 USER node
 
 FROM base AS build
