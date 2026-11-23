@@ -174,9 +174,10 @@ the starting state before execution; repeated events cannot resume again. The
 handler returns after durable admission, keeping later replies out of the native
 ordinary model queue. Other Slack input is claimed without executing an agent
 when coding Slack settings are present. Replies predating the current native
-Slack connection must be resent. This ingress path is fixture-qualified; keep
-native channel admission disabled outside bounded live qualification until the
-ingress path passes that qualification. Provider
+Slack connection must be resent. This ingress path passed a real authorized-human Slack reply and same-task
+resumption qualification, including validated committed delivery and replay
+protection. Native admission is enabled only for the configured coding channel
+and authorized user allowlist. Provider
 token accounting still needs integration.
 Each coding task uses a bound thread. Status updates and requests for human input
 are distinct operations: only a confirmed transition to waiting stops the task's

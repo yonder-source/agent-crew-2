@@ -37,6 +37,9 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
   let releaseRun;
   let runId = "run-7";
   let codingStatus = "ok";
+  let admissionHold, releaseAdmission, notifyAdmission;
+  const admissionWritten = new Promise(resolve => { notifyAdmission = resolve; });
+  let retainedQuestion;
   let requestInput;
   let hasActiveRun = false;
   let stoppedRunId = "run-7";
@@ -132,9 +135,11 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
           throw new Error("Secret-bearing persistence failure");
         }
         session.pluginExtensions = [{ pluginId: "agent-crew", namespace: "agent-crew-job", value: params.value }];
+        if (params.value.status === "starting" && admissionHold) { notifyAdmission(); await admissionHold; }
         return {};
       }
       if (method === "tools.invoke") {
+        if (retainedQuestion) session.pluginExtensions[0].value.inputRequest = retainedQuestion;
         if (heldRun) await heldRun;
         clock += turnMs;
         if (stoppedRunId === "run-7") stoppedRunId = runId;
@@ -169,6 +174,9 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
   }
   return {
     calls, slackMessages,
+    holdAdmission() { admissionHold = new Promise(resolve => { releaseAdmission = resolve; }); },
+    admissionWritten,
+    releaseAdmission() { releaseAdmission(); admissionHold = undefined; },
     reconnectAt(value) { connectedAt = value; },
     inbound(event, context) { return hooks.get("before_dispatch")(event, context); },
     failSlackMessageAt(value) { failSlackAt = value; },
@@ -185,6 +193,7 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
       });
     },
     session: () => session,
+    retainQuestionDuringRun(value) { retainedQuestion = value; },
     setCoding(status, text = codingText) { codingStatus = status; codingText = text; },
     setValidation(value) { codingValidation = value; },
     failDelivery() { deliveryFailure = true; },
@@ -584,3 +593,19 @@ assert.equal(acceptedAckLost.calls.some(call => call.method === "tools.invoke"),
 assert.equal((await acceptedAckLost.status()).details.job.status, "needs-inspection");
 await acceptedAckLost.inbound(slackEvent, slackContext);
 assert.equal(acceptedAckLost.calls.some(call => call.method === "tools.invoke"), false);
+
+const restoredQuestion = harness();
+restoredQuestion.retainQuestionDuringRun("Prior waiting question observed by the final metadata read");
+const terminal = await restoredQuestion.method("agent-crew.dispatch", issue);
+assert.equal(terminal.value.job.status, "completed");
+assert.equal(terminal.value.job.inputRequest, undefined, "A completed task must clear a retained prior question");
+
+const admissionView = harness(structuredClone(waitingSnapshot));
+admissionView.setInventory({ sessions: [{ key: waited.value.job.sessionKey, hasActiveRun: false }] });
+admissionView.holdAdmission();
+const admittingResume = admissionView.method("agent-crew.resume", resumeParams);
+await admissionView.admissionWritten;
+const admissionStatus = (await admissionView.status()).details.job.status;
+admissionView.releaseAdmission();
+await admittingResume;
+assert.equal(admissionStatus, "starting", "A current-process resume awaiting metadata acknowledgement is not uncertain");

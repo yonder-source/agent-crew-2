@@ -186,6 +186,7 @@ export default definePluginEntry({
     const bootId = randomUUID();
     let queue = Promise.resolve();
     let startingJobId: string | undefined;
+    const admittingSessions = new Set<string>();
     let pendingDispatches = 0;
     let setupApplying = false;
     let pollingReady = config.github?.appId === undefined;
@@ -308,7 +309,7 @@ export default definePluginEntry({
       // Read-only normalization avoids a status request racing an operator reset.
       return {
         ...job,
-        ...(job.status === "starting" && (job.bootId !== bootId || job.jobId !== startingJobId)
+        ...(job.status === "starting" && (job.bootId !== bootId || (job.jobId !== startingJobId && !admittingSessions.has(job.sessionKey)))
           ? { status: "needs-inspection" as const } : {}),
         ...(job.issueUpdate?.status === "writing" && !activeIssueUpdates.has(job.issueUpdate.operationId)
           ? { issueUpdate: { ...job.issueUpdate, status: "needs-inspection" as const } }
@@ -520,20 +521,29 @@ export default definePluginEntry({
         if (!existing) throw new Error("Task active-time budget is exhausted.");
         return patchJob(issue, (current) => ({ ...current, status: "needs-inspection", error: "Task active-time limit reached", updatedAt: new Date().toISOString() }));
       }
-      const job = existing
-        ? await patchJob(issue, (current) => ({
-          ...baseJob(issue),
-          ...(resume ? { jobId: current.jobId, codingSessionId: current.codingSessionId } : {}),
-          ...(config.coding ? { activeMs: usedMs, activeTimeUncertain: true } : {}),
-          ...(workspace && baseCommit ? { workspacePath: workspace.path, workspaceBranch: workspace.branch, baseCommit } : {}),
-          ...(current.slackThread ? { slackThread: { ...current.slackThread,
-            ...(resume?.slackReply ? { acceptedReplyTs: resume.slackReply.messageTs } : {}) } } : {}),
-          ...(current.decision ? { decision: current.decision } : {}),
-          ...(current.issueUpdate ? { issueUpdate: current.issueUpdate } : {}),
-        }))
+      let job: Job;
+      admittingSessions.add(issueSessionKey(issue));
+      try {
+        job = existing
+          ? await patchJob(issue, (current) => ({
+            ...baseJob(issue),
+            ...(resume ? { jobId: current.jobId, codingSessionId: current.codingSessionId } : {}),
+            ...(config.coding ? { activeMs: usedMs, activeTimeUncertain: true } : {}),
+            ...(workspace && baseCommit ? { workspacePath: workspace.path, workspaceBranch: workspace.branch, baseCommit } : {}),
+            ...(current.slackThread ? { slackThread: { ...current.slackThread,
+              ...(resume?.slackReply ? { acceptedReplyTs: resume.slackReply.messageTs } : {}) } } : {}),
+            ...(current.decision ? { decision: current.decision } : {}),
+            ...(current.issueUpdate ? { issueUpdate: current.issueUpdate } : {}),
+          }))
           : { ...baseJob(issue), ...(workspace && baseCommit ? { workspacePath: workspace.path, workspaceBranch: workspace.branch, baseCommit } : {}) };
-      startingJobId = job.jobId;
-      if (!existing) await writeJob(issue, config.coding ? { ...job, activeTimeUncertain: true } : job);
+        startingJobId = job.jobId;
+        if (!existing) await writeJob(issue, config.coding ? { ...job, activeTimeUncertain: true } : job);
+      } catch (error) {
+        startingJobId = undefined;
+        throw error;
+      } finally {
+        admittingSessions.delete(issueSessionKey(issue));
+      }
       resume?.onAdmitted?.();
       let turnStartedAt: number | undefined;
       let activeMs = usedMs;
@@ -647,23 +657,30 @@ export default definePluginEntry({
             }
           }
         }
-        const completed = await patchJob(issue, (current) => ({
-          ...current,
-          status: inputRequest !== undefined ? "waiting" : workflowStatus === "ok" && (!config.coding || codingDelivery?.status === "ready")
-            ? "completed" : workflowStatus === "cancelled" || (config.coding && codingResult?.status !== "ok")
-              || codingDelivery?.status === "needs-inspection"
-              ? "needs-inspection" : "active",
-          workflowStatus,
-          ...(config.coding ? { activeMs, activeTimeUncertain: false } : {}),
-          ...(inputRequest !== undefined ? { inputRequest } : {}),
-          ...(codingSessionId !== undefined ? { codingSessionId } : {}),
-          ...(codingResult && typeof codingResult.runId === "string" ? { codingRunId: codingResult.runId } : {}),
-          ...(codingResult && typeof codingResult.status === "string" ? { codingRunStatus: codingResult.status } : {}),
-          ...(codingResult && typeof codingResult.text === "string" ? { codingSummary: codingResult.text } : {}),
-          ...(codingDelivery ? { codingDelivery } : {}),
-          ...(typeof continuation?.resumeToken === "string" ? { workflowRef: continuation.resumeToken } : {}),
-          updatedAt: new Date().toISOString(),
-        }));
+        const completed = await patchJob(issue, (current) => {
+          const next = { ...current };
+          delete next.inputRequest;
+          delete next.codingDelivery;
+          delete next.workflowRef;
+          delete next.error;
+          return {
+            ...next,
+            status: inputRequest !== undefined ? "waiting" : workflowStatus === "ok" && (!config.coding || codingDelivery?.status === "ready")
+              ? "completed" : workflowStatus === "cancelled" || (config.coding && codingResult?.status !== "ok")
+                || codingDelivery?.status === "needs-inspection"
+                ? "needs-inspection" : "active",
+            workflowStatus,
+            ...(config.coding ? { activeMs, activeTimeUncertain: false } : {}),
+            ...(inputRequest !== undefined ? { inputRequest } : {}),
+            ...(codingSessionId !== undefined ? { codingSessionId } : {}),
+            ...(codingResult && typeof codingResult.runId === "string" ? { codingRunId: codingResult.runId } : {}),
+            ...(codingResult && typeof codingResult.status === "string" ? { codingRunStatus: codingResult.status } : {}),
+            ...(codingResult && typeof codingResult.text === "string" ? { codingSummary: codingResult.text } : {}),
+            ...(codingDelivery ? { codingDelivery } : {}),
+            ...(typeof continuation?.resumeToken === "string" ? { workflowRef: continuation.resumeToken } : {}),
+            updatedAt: new Date().toISOString(),
+          };
+        });
         return completed.status === "waiting" ? await deliverInputRequest(issue, completed) : completed;
       } catch {
         const retained = await readJob(issue);

@@ -229,13 +229,13 @@ not native inbound conversation routing. See
 The native before_dispatch reply adapter now matches host-authenticated Slack
 identity to the retained task, rechecks the current question, and durably admits
 one reply before returning to Slack. Other replies cannot fall through to an
-ordinary model turn while this adapter owns Slack input. This is fixture-qualified;
-native channel admission remains disabled pending live ingress qualification.
+ordinary model turn while this adapter owns Slack input. The adapter has fixture coverage and passed the bounded live ingress
+qualification described below.
 See [reply ingress evidence](evidence/wbs4.5-slack-task-reply-qualification.md).
 A bounded live test has now deployed the adapter and enabled only the configured
 coding channel/user. Real discovery, model input request, Slack root/question
-delivery and retained waiting across replacement are qualified. Authorized human
-reply/resumption is pending; see [live test evidence](evidence/wbs4.5-slack-live-qualification.md).
+delivery, retained waiting across replacement, authorized human reply and
+same-session/worktree resumption through validated committed delivery are qualified; see [live test evidence](evidence/wbs4.5-slack-live-qualification.md).
 See [waiting boundary evidence](evidence/wbs4.5-coding-waiting-qualification.md).
 
 **Small batch 6 — Controller task authorization:** Extend the Controller's
