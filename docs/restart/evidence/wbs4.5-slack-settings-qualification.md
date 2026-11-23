@@ -37,9 +37,24 @@ unconfigured; designer execution and thread routing remain later work.
   and authorized user `U0AU1QTH04T` all passed the real Slack read-only checks.
   No Slack messages were sent.
 
+## Live Gateway deployment
+
+Deployed source commit `789c3cf` using all three Compose files (base, setup,
+Slack). Runtime image: `sha256:4306f3ba4547d724d935c1df541c3014031385fe6b0596ad4cba5f35a7472dad`.
+Previous image retained as `agent-crew-openclaw:before-slack-settings-20261123`.
+Preflight found 12 sessions and no active runs.
+
+The authenticated native setup Validate method passed repository, agent and
+both Slack role checks. Apply acknowledged the saved configuration and reported
+activation pending. After Gateway restart, draft.get current values matched the
+saved channel/user settings and polling returned to running with no activation
+pending. Native Slack account status reported running/connected with a successful
+bot probe. The retained issue-2 job, run, workspace, branch, base and committed
+coding delivery remained identical. No Slack message, GitHub write or publication
+was performed.
+
 ## Boundary
 
-This source change has not been deployed. Live checks exercised the helper
-against Slack, not the new Gateway setup methods or UI Apply across restart.
-The previously deployed native Socket Mode transport is unchanged. Task-bound
-waiting/resume, cumulative usage and live setup Apply remain unqualified.
+The live setup RPC path and restart persistence are qualified; browser clicks
+were not exercised. Task-bound waiting/resume and cumulative usage remain
+unqualified. The deployment does not enable ordinary Slack command dispatch.

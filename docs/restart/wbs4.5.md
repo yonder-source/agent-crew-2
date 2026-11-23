@@ -207,7 +207,9 @@ connection are qualified separately in
 [native Slack connection evidence](evidence/wbs4.5-slack-socket-qualification.md).
 Saved channel/user settings now have read-only validation and Apply persistence;
 see [settings validation evidence](evidence/wbs4.5-slack-settings-qualification.md).
-Live Gateway Apply and task-bound interaction remain outstanding. See
+Live Gateway Validate/Apply and restart persistence are qualified through the
+authenticated setup RPCs; browser interaction and task-bound interaction remain
+outstanding. See
 [credential readiness evidence](evidence/wbs4.5-slack-credential-readiness.md).
 
 **Small batch 6 — Controller task authorization:** Extend the Controller's
