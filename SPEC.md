@@ -50,7 +50,8 @@ small OpenClaw integration; it does not implement this workflow.
 
 [WBS4.5](docs/restart/wbs4.5.md), between coding execution and draft PR
 publication, delivers a required single-repository connection screen accessible
-from OpenClaw. An authenticated operator can configure the GitHub repository
+from OpenClaw at `/plugin?plugin=agent-crew&id=setup` under the connected
+Gateway Control UI origin, with custom plugin UI enabled. An authenticated operator can configure the GitHub repository
 and matching checkout without editing JSON, inspect credential availability,
 validate access and save the connection using the existing configuration store.
 Keep secret values out of UI responses. Configuration must survive restart;

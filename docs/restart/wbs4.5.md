@@ -208,7 +208,10 @@ connection are qualified separately in
 Saved channel/user settings now have read-only validation and Apply persistence;
 see [settings validation evidence](evidence/wbs4.5-slack-settings-qualification.md).
 Live Gateway Validate/Apply and restart persistence are qualified through the
-authenticated setup RPCs; browser interaction remains outstanding. Task-bound
+authenticated setup RPCs. The actual native Control UI now also qualifies repository
+discovery, Save/validation, unchanged-connection Apply, invalid token-budget
+gating and retained settings after Gateway restart; see the
+[browser acceptance evidence](evidence/wbs4.5-ui-browser-qualification.md). Task-bound
 interaction is qualified in the later live evidence below. See
 [credential readiness evidence](evidence/wbs4.5-slack-credential-readiness.md).
 
