@@ -55,7 +55,16 @@ The underlying native same-session model continuation was qualified separately
 in [waiting evidence](wbs4.5-coding-waiting-qualification.md). These new RPC/state
 checks use fixtures; they are not live Controller or Slack acceptance.
 
-## Remaining boundary
+## Original remaining boundary (superseded)
+
+Deployment and real human/model/Slack resumption are now qualified in
+[live Slack evidence](wbs4.5-slack-live-qualification.md); cumulative accounting
+and turn-boundary enforcement are qualified in
+[token evidence](wbs4.5-coding-token-qualification.md). The paragraph below is
+the original batch snapshot. Automatic usage reconciliation and full WBS6 MVP
+acceptance are not established by those later tests.
+
+### Historical batch boundary
 
 This batch is committed but not deployed. The live Gateway remains at source
 789c3cf. Slack task-thread creation, input-request delivery and authenticated

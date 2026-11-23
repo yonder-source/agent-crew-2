@@ -61,7 +61,16 @@ hook. Slack threads-and-sessions documents the channel thread session grammar.
 The adapter uses the injected public api.on hook and the existing public Gateway
 client; no additional private SDK import or duplicate Socket Mode client is used.
 
-## Deployment boundary
+## Original deployment boundary (superseded)
+
+The adapter is now deployed, with canonical native session-key handling and
+actual authorized human reply resumption qualified in
+[live Slack evidence](wbs4.5-slack-live-qualification.md). Later usage and stop
+qualification is in [token evidence](wbs4.5-coding-token-qualification.md).
+Full MVP reporting/acceptance remains WBS6 scope. The paragraph below records
+this batch before that deployment.
+
+### Historical batch boundary
 
 This batch is not deployed. Native Slack channel admission remains disabled in
 the live Gateway, which still runs source 789c3cf. Native event shape, channel

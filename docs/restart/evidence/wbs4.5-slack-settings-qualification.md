@@ -53,7 +53,15 @@ bot probe. The retained issue-2 job, run, workspace, branch, base and committed
 coding delivery remained identical. No Slack message, GitHub write or publication
 was performed.
 
-## Boundary
+## Original boundary (superseded for browser and interaction)
+
+The actual native browser flow is now qualified in
+[browser evidence](wbs4.5-ui-browser-qualification.md), task-bound human replies
+in [live Slack evidence](wbs4.5-slack-live-qualification.md), and accounting in
+[token evidence](wbs4.5-coding-token-qualification.md). The original batch
+boundary below remains a description of the checks performed at that point.
+
+### Historical batch boundary
 
 The live setup RPC path and restart persistence are qualified; browser clicks
 were not exercised. Task-bound waiting/resume and cumulative usage remain

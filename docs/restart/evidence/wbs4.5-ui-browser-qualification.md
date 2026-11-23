@@ -62,3 +62,44 @@ GitHub push, issue write or PR creation. Changed-connection configuration writes
 active/uncertain-task rejection and authorization tests retain their separate
 native RPC/fixture evidence; this browser run does not replace those checks.
 Designer role validation does not establish designer execution or inbound routing.
+
+## Changed settings and inspection guard — 2026-11-23
+
+A subsequent native browser run saved token budget `10000000`. While disposable
+issue 6 was retained as `needs-inspection`, validation succeeded but Apply was
+rejected before changing the active configuration. Save therefore remained a
+pending draft and did not bypass the task guard. The issue's real model had
+finished without running its requested timer; this was not timeout acceptance.
+After confirming its native run stopped, the operator abandoned that test and
+removed its ready label.
+
+Fresh validation and Apply then saved the changed budget. The page reported
+runtime activation pending; a native current-settings read after reload reported
+`tokenBudget="10000000"`, matching the durable configuration file. The page
+retained that value on reload. Scheduling initially remained paused, and the
+native page's Resume scheduling control restored it after safety checks.
+
+The same browser then saved and applied an empty budget. The active runtime and
+saved draft both reported `tokenBudget=""`, and polling returned to Running
+with `activationPending=false`. This exercises a real configuration change and
+restoration, rather than only the unchanged-connection fast path. It does not
+change the selected repository, clone a second source checkout, or enable any
+publication action.
+
+## No-draft startup regression
+
+The current-settings RPC omitted `githubAppId` and `installationId`, so a page
+without a retained draft could not prefill the complete existing connection.
+A Controller fixture with an absent draft reproduced the missing App ID; commit
+`0ae0284` adds the non-secret identifiers to current settings and covers App-mode
+and legacy-token configurations.
+
+A separate fresh native Gateway using the corrected image had no retained draft,
+no mounted secrets and fixture App/installation/repository identifiers. The real
+RPC returned `draft=null`, App ID `1234` and installation `17`. Chromium loaded
+its actual native plugin page and confirmed App ID `1234`, repository
+`fixture/repository` and the configured source path were prefilled without
+repository discovery or saving a draft. This is native browser integration with
+fixture connection data, not GitHub access acceptance. The isolated Gateway
+was stopped after the check. Live GitHub reads are qualified above using the
+persistent Gateway's actual connection.

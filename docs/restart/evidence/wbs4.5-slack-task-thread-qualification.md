@@ -44,6 +44,11 @@ fixtures. Additional cases verify:
 
 ## Boundary
 
+Later deployment and real task root/question delivery, restart retention and
+authorized human resumption are qualified in
+[live Slack evidence](wbs4.5-slack-live-qualification.md). The following paragraph
+is the historical boundary of this original fixture batch.
+
 No live Slack messages were sent, and this batch is not deployed. Provider writes
 and state transitions were exercised with fixtures, not live Slack acceptance.
 The retained application thread is not a native conversation binding. Native

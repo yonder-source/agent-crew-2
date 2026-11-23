@@ -52,7 +52,17 @@ Git status was clean. The marker-bearing native Codex transcript
 had zero tool-call records. Neither turn used tools or edited files. The probe did
 not require a worktree context-summary file.
 
-## Scope limits
+## Original scope limits (superseded for deployment and Slack)
+
+The following describes this batch at the time it was run. Subsequent
+[Controller/Slack live acceptance](wbs4.5-slack-live-qualification.md) qualifies
+deployment, assigned-issue dispatch, retained waiting across Gateway replacement
+and authorized same-session/worktree resumption.
+[Token evidence](wbs4.5-coding-token-qualification.md) records later accounting
+and stop corrections. These later results do not change this probe into a
+Controller integration test.
+
+### Historical batch boundary
 
 The new Controller waiting path is fixture-qualified and is not deployed.
 The native probe qualifies model/session continuation only; it does not exercise
