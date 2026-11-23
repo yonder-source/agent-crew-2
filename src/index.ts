@@ -756,6 +756,8 @@ export default definePluginEntry({
         respond(true, {
           draft: value === undefined ? null : parseSetupDraft(value),
           current: {
+            githubAppId: config.github?.appId ?? "",
+            installationId: config.github?.installationId?.toString() ?? "",
             repository: config.github?.repository ?? "",
             repositoryPath: config.coding?.repositoryPath ?? "",
             codingAgentId: config.coding?.agentId ?? "",

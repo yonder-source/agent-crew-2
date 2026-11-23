@@ -51,6 +51,7 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
   let inventory = { sessions: [] };
   const setupDraft = { githubAppId: "123", repository: "owner/repo", installationId: "17", repositoryPath,
     codingAgentId: "coding", designerAgentId: "", codingChannelId: "", designerChannelId: "", codingUserIds: "", designerUserIds: "", tokenBudget: "", ...slackDraft };
+  let draftAvailable = true;
   const calls = [];
   const methods = new Map();
   const hooks = new Map();
@@ -157,7 +158,7 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
   });
   runInContext(source, context);
   context.entry.register({
-    runtime: { state: { openKeyedStoreV2: () => ({ lookup: async () => setupDraft }) } },
+    runtime: { state: { openKeyedStoreV2: () => ({ lookup: async () => draftAvailable ? setupDraft : undefined }) } },
     session: { state: { registerSessionExtension() {} } },
     registerTool: (tool) => registeredTools.set(tool.name, tool),
     registerGatewayMethod: (name, handler, options) => methods.set(name, { handler, options }),
@@ -175,6 +176,7 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
   }
   return {
     calls, slackMessages,
+    clearDraft() { draftAvailable = false; },
     holdAdmission() { admissionHold = new Promise(resolve => { releaseAdmission = resolve; }); },
     admissionWritten,
     releaseAdmission() { releaseAdmission(); admissionHold = undefined; },
@@ -365,7 +367,6 @@ for (const inventory of [
 }
 setup.setInventory({ sessions: [] });
 assert.equal((await setup.method("agent-crew.setup.repository.clone", cloneParams)).ok, true);
-console.log("Coding dispatch and setup admission boundary fixtures passed.");
 
 const waiting = harness();
 waiting.requestInput("Choose the expected behavior");
@@ -675,3 +676,16 @@ const invalidBudget = harness(null, true, {tokenBudget: "-1"});
 assert.equal((await invalidBudget.method("agent-crew.setup.validate", {})).value.valid, false);
 assert.equal((await invalidBudget.method("agent-crew.setup.apply", {})).ok, false);
 assert.equal(invalidBudget.calls.some(call => call.method === "config.set"), false);
+
+const noDraftApp = harness(null, true);
+noDraftApp.clearDraft();
+const initialSetup = (await noDraftApp.method("agent-crew.setup.draft.get", {})).value;
+assert.equal(initialSetup.draft, null);
+const currentAppConnection = initialSetup.current;
+assert.equal(currentAppConnection.githubAppId, "123", "Existing App ID must prefill without a saved draft");
+assert.equal(currentAppConnection.installationId, "17", "Existing installation must remain bound without rediscovery");
+const currentLegacyConnection = (await harness().method("agent-crew.setup.draft.get", {})).value.current;
+assert.equal(currentLegacyConnection.githubAppId, "");
+assert.equal(currentLegacyConnection.installationId, "");
+
+console.log("Coding dispatch and setup admission boundary fixtures passed.");
