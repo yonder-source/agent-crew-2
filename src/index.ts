@@ -15,6 +15,7 @@ import { normalizeCodingValidation, isCodingDelivery, type CodingDelivery } from
 import { validateCheckout, type ConnectionCheck } from "./repository-validation.js";
 import { connectionConfig } from "./setup-config.js";
 import { draftSlackSettings, validateSlackSettings } from "./slack-settings.js";
+import { isSlackTaskThread, postTaskSlackMessage, type SlackTaskThread } from "./slack-task-thread.js";
 import { slackCredentialStatus } from "./slack-credentials.js";
 
 const NAMESPACE = "agent-crew-job";
@@ -76,6 +77,7 @@ type Job = Issue & {
   codingRunStatus?: string;
   codingSummary?: string;
   inputRequest?: string;
+  slackThread?: SlackTaskThread;
   activeMs?: number;
   activeTimeUncertain?: boolean;
   codingSessionId?: string;
@@ -113,6 +115,7 @@ function isJob(value: unknown): value is Job {
       (value.activeTimeUncertain !== undefined && typeof value.activeTimeUncertain !== "boolean") ||
       (value.activeMs !== undefined && (typeof value.activeMs !== "number" || !Number.isSafeInteger(value.activeMs) || value.activeMs < 0)) ||
       (value.connection !== undefined && (!isRecord(value.connection) || typeof value.connection.agentId !== "string" || typeof value.connection.repositoryPath !== "string")) ||
+      (value.slackThread !== undefined && !isSlackTaskThread(value.slackThread)) ||
       (value.inputRequest !== undefined && (typeof value.inputRequest !== "string" || !value.inputRequest.trim() || value.inputRequest.length > 4_000)) ||
       (value.status === "waiting" && (typeof value.inputRequest !== "string" || value.codingRunStatus !== "ok" ||
         typeof value.codingRunId !== "string" || !value.codingRunId || typeof value.workspacePath !== "string" ||
@@ -144,6 +147,7 @@ function publicJob(job: Job) {
     ...(job.codingRunStatus !== undefined ? { codingRunStatus: job.codingRunStatus } : {}),
     ...(job.activeTimeUncertain !== undefined ? { activeTimeUncertain: job.activeTimeUncertain } : {}),
     ...(job.activeMs !== undefined ? { activeMs: job.activeMs, activeTimeLimitMs: TASK_ACTIVE_LIMIT_MS } : {}),
+    ...(job.slackThread !== undefined ? { slackThread: job.slackThread } : {}),
     ...(job.inputRequest !== undefined ? { inputRequest: job.inputRequest } : {}),
     ...(job.codingSummary !== undefined ? { codingSummary: job.codingSummary } : {}),
     ...(job.workspacePath !== undefined ? { workspacePath: job.workspacePath } : {}),
@@ -374,6 +378,52 @@ export default definePluginEntry({
       ...(config.coding ? { activeMs: 0, connection: { agentId: config.coding.agentId, repositoryPath: config.coding.repositoryPath } } : {}),
     });
 
+    const taskSlackThread = async (issue: Issue, job: Job): Promise<SlackTaskThread | undefined> => {
+      const setting = config.slack?.coding;
+      if (!setting) {
+        if (job.slackThread) throw new Error("Task Slack configuration changed; inspect before continuing.");
+        return undefined;
+      }
+      if (setting.agentId !== config.coding?.agentId || (job.slackThread &&
+          (job.slackThread.agentId !== setting.agentId || job.slackThread.channelId !== setting.channelId ||
+            JSON.stringify(job.slackThread.userIds) !== JSON.stringify(setting.userIds)))) {
+        throw new Error("Task Slack binding changed; inspect before continuing.");
+      }
+      if (job.slackThread) {
+        if (job.slackThread.status !== "ready") throw new Error("Task thread creation requires inspection.");
+        return job.slackThread;
+      }
+      const creating: SlackTaskThread = { ...setting, userIds: [...setting.userIds], status: "creating" };
+      await patchJob(issue, (current) => ({ ...current, slackThread: creating }));
+      let threadTs: string;
+      try {
+        threadTs = await postTaskSlackMessage(setting.channelId, `Agent Crew task ${job.repository}#${job.number}`, undefined,
+          (path) => readFile(path, "utf8"));
+      } catch {
+        await patchJob(issue, (current) => ({ ...current, slackThread: { ...creating, status: "failed" } }));
+        throw new Error("Task Slack thread creation requires inspection.");
+      }
+      const ready: SlackTaskThread = { ...creating, status: "ready", threadTs };
+      await patchJob(issue, (current) => ({ ...current, slackThread: ready }));
+      return ready;
+    };
+    const deliverInputRequest = async (issue: Issue, job: Job): Promise<Job> => {
+      const thread = job.slackThread;
+      if (!thread || thread.status !== "ready" || !thread.threadTs || !job.inputRequest || !job.codingRunId) return job;
+      if (thread.input?.runId === job.codingRunId) return job; // Includes uncertain sends: never replay.
+      const input = { runId: job.codingRunId, status: "sending" as const };
+      await patchJob(issue, (current) => ({ ...current, slackThread: { ...thread, input } }));
+      let sent: SlackTaskThread["input"];
+      try {
+        const messageTs = await postTaskSlackMessage(thread.channelId, job.inputRequest, thread.threadTs,
+          (path) => readFile(path, "utf8"));
+        sent = { ...input, status: "sent", messageTs };
+      } catch {
+        sent = { ...input, status: "failed" };
+      }
+      return patchJob(issue, (current) => ({ ...current, slackThread: { ...thread, input: sent } }));
+    };
+
     const dispatchIssue = (issue: Issue, operatorRetry = false, resume?: { expectedRunId: string; input: string }): Promise<Job> => {
       const requestedEpoch = admissionEpoch;
       const admissionWasOpen = !setupApplying && pollingReady;
@@ -471,6 +521,7 @@ export default definePluginEntry({
           ...(resume ? { jobId: current.jobId, codingSessionId: current.codingSessionId } : {}),
           ...(config.coding ? { activeMs: usedMs, activeTimeUncertain: true } : {}),
           ...(workspace && baseCommit ? { workspacePath: workspace.path, workspaceBranch: workspace.branch, baseCommit } : {}),
+          ...(current.slackThread ? { slackThread: current.slackThread } : {}),
           ...(current.decision ? { decision: current.decision } : {}),
           ...(current.issueUpdate ? { issueUpdate: current.issueUpdate } : {}),
         }))
@@ -488,6 +539,7 @@ export default definePluginEntry({
           if (assignedIssue.state !== "open" || !assignedIssue.labels.includes("ready for agent")) {
             throw new Error("Assigned issue is no longer ready for coding");
           }
+          await taskSlackThread(issue, job);
           workflowArgs = JSON.stringify({
             sessionKey: job.sessionKey,
             agentId: config.coding.agentId,
@@ -605,8 +657,10 @@ export default definePluginEntry({
           ...(typeof continuation?.resumeToken === "string" ? { workflowRef: continuation.resumeToken } : {}),
           updatedAt: new Date().toISOString(),
         }));
-        return completed;
+        return completed.status === "waiting" ? await deliverInputRequest(issue, completed) : completed;
       } catch {
+        const retained = await readJob(issue);
+        if (retained?.status === "waiting") return retained;
         if (turnStartedAt !== undefined) activeMs += Math.ceil(performance.now() - turnStartedAt);
         const uncertain = await patchJob(issue, (current) => ({
           ...current,

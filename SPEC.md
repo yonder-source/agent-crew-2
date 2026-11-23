@@ -157,8 +157,17 @@ seconds from the shared 20-minute limit to subsequent turns. Reaching the limit
 blocks delivery and requires inspection. Persist an uncertainty marker before
 execution so interrupted or unacknowledged calls cannot resume or retry with
 unknown elapsed time. Legacy waiting records without elapsed time or physical
-session identity cannot resume by assuming zero. Slack thread binding and
-provider token accounting still need integration.
+session identity cannot resume by assuming zero. With coding Slack settings,
+the Controller creates and retains one task root message before coding starts,
+including its channel, agent and authorized user IDs. Resume reuses that thread
+and rejects changed Slack settings. A confirmed waiting question is sent as a
+plain-text reply in the retained thread; its run ID and delivery state are
+persisted. Root creation and input-request sends record an intent before the
+write. Failed or unacknowledged root creation blocks coding for inspection;
+failed input delivery leaves the task waiting. Lost metadata acknowledgements
+retain the sending marker and never trigger automatic replay. Native inbound
+conversation binding, authorized Slack reply ingress and provider token accounting
+still need integration.
 Each coding task uses a bound thread. Status updates and requests for human input
 are distinct operations: only a confirmed transition to waiting stops the task's
 active-time clock. Accept the first authorized reply in the bound thread and

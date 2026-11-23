@@ -1,3 +1,4 @@
+import { isSlackTaskThread, postTaskSlackMessage } from "../dist/slack-task-thread.js";
 import { performance } from "node:perf_hooks";
 import { TaskBaseError } from "../dist/repository-clone.js";
 import assert from "node:assert/strict";
@@ -24,7 +25,7 @@ const workflowRelease = new Promise((resolve) => { releaseWorkflowResolve = reso
 const tools = new Map();
 const methods = new Map();
 let issueToolFactory;
-const context = createContext({ performance,
+const context = createContext({ isSlackTaskThread, postTaskSlackMessage, performance,
   TaskBaseError, createHash, randomUUID, isCodingDelivery, process: { env: { AGENT_CREW_GATEWAY_TOKEN: "test" } },
   assignedIssueFromSession, trustedSessionKey,
   GitHubAppClient,

@@ -221,6 +221,11 @@ thread routing and token budgets remain outstanding. Operator-admin resume now
 reuses the retained job/session/worktree, rejects concurrent/stale replies and
 uses the remaining cumulative active-time budget. This path is fixture-qualified,
 not deployed; see [resume evidence](evidence/wbs4.5-coding-resume-qualification.md).
+Task root creation and input-request replies now retain the Slack thread and
+write intent/delivery state in task metadata; failed input delivery stays waiting,
+and uncertain writes are not replayed. This is application-owned thread metadata,
+not native inbound conversation routing. See
+[thread delivery evidence](evidence/wbs4.5-slack-task-thread-qualification.md).
 See [waiting boundary evidence](evidence/wbs4.5-coding-waiting-qualification.md).
 
 **Small batch 6 — Controller task authorization:** Extend the Controller's
