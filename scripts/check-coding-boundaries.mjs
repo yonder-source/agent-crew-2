@@ -535,7 +535,7 @@ for (const stage of ["root", "sent"]) {
 
 const slackEvent = { channel: "slack", content: "Use the smaller change", senderId: "U123", messageId: "100.000003" };
 const slackContext = { channelId: "slack", accountId: "default", senderId: "U123", messageId: "100.000003",
-  sessionKey: "agent:main:slack:channel:C123:thread:100.000001" };
+  sessionKey: "agent:main:slack:channel:c123:thread:100.000001" };
 const inboundSnapshot = structuredClone(slackWait.session());
 const inbound = harness(inboundSnapshot, false, {}, slackConfig);
 inbound.setInventory({ sessions: [{ key: slackWaited.value.job.sessionKey, hasActiveRun: false }] });

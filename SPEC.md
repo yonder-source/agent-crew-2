@@ -175,7 +175,8 @@ handler returns after durable admission, keeping later replies out of the native
 ordinary model queue. Other Slack input is claimed without executing an agent
 when coding Slack settings are present. Replies predating the current native
 Slack connection must be resent. This ingress path is fixture-qualified; keep
-native channel admission disabled until live ingress qualification. Provider
+native channel admission disabled outside bounded live qualification until the
+ingress path passes that qualification. Provider
 token accounting still needs integration.
 Each coding task uses a bound thread. Status updates and requests for human input
 are distinct operations: only a confirmed transition to waiting stops the task's

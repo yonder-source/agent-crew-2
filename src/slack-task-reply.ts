@@ -11,9 +11,9 @@ export function parseSlackTaskReply(event: unknown, context: unknown): SlackTask
       typeof context.senderId !== "string" || !/^[UW][A-Z0-9]+$/.test(context.senderId) ||
       event.senderId !== context.senderId || event.messageId !== context.messageId || !timestamp(context.messageId) ||
       typeof event.content !== "string" || !event.content.trim() || event.content.length > 16_000) return undefined;
-  const match = /^agent:[a-z][a-z0-9_-]*:slack:channel:([CG][A-Z0-9]+):thread:(\d{1,20}\.\d{1,9})$/.exec(context.sessionKey);
+  const match = /^agent:[a-z][a-z0-9_-]*:slack:channel:([cCgG][A-Za-z0-9]+):thread:(\d{1,20}\.\d{1,9})$/.exec(context.sessionKey);
   if (!match?.[1] || !match[2]) return undefined;
-  return { channelId: match[1], threadTs: match[2], messageTs: context.messageId,
+  return { channelId: match[1].toUpperCase(), threadTs: match[2], messageTs: context.messageId,
     userId: context.senderId, text: event.content };
 }
 

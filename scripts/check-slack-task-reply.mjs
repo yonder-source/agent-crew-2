@@ -30,3 +30,6 @@ assert.equal(isReplyAfterSlackConnection(reply, 100_000), true);
 assert.equal(isReplyAfterSlackConnection(reply, 101_000), false);
 assert.equal(isReplyAfterSlackConnection(reply, undefined), false);
 console.log("Slack task reply identity, authorization, replay and reconnect fixtures passed.");
+
+assert.equal(parseSlackTaskReply(event, { ...context, sessionKey: context.sessionKey.toLowerCase() }).channelId, "C123",
+  "The pinned runtime canonicalizes Slack session keys to lowercase");
