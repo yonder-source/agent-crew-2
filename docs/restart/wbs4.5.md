@@ -211,6 +211,11 @@ installation tokens into the agent context. Verify the constructed prompt with
 fixtures covering conflicting issue text and repository guidance, and confirm
 the agent context contains no credential values.
 
+The prompt identifies the assigned-issue tools and directs Codex to discover
+deferred callables using the active harness rather than guessing a JavaScript
+namespace. Actual model-triggered issue read and update-tool discovery are
+recorded in [assigned-issue tool qualification](evidence/wbs4.5-assigned-issue-tool-qualification.md).
+
 **Done when:** Each dispatched coding turn receives the explicit task-scoped
 authorization and repository-guidance precedence rule, while existing sandbox
 credential isolation remains intact. The conflict fixtures demonstrate that

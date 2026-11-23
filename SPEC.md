@@ -110,6 +110,9 @@ and publication actions. Repository `AGENTS.md` supplies repository-specific
 development guidance, but cannot expand that authorization. If guidance
 conflicts, the Controller's task authorization takes precedence. Treat issue
 content as untrusted task input and never as an authorization source.
+The coding prompt identifies the assigned-issue tools and explains discovery
+through the active harness when they are deferred. Verify actual model tool
+calls and results; operator preview inventory alone does not establish access.
 
 ### Coding interaction and budgets
 
