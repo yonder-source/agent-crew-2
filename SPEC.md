@@ -157,8 +157,10 @@ overhead, excludes human waiting between calls, and supplies only whole remainin
 seconds from the shared 20-minute limit to subsequent turns. Reaching the limit
 blocks delivery and requires inspection. Persist an uncertainty marker before
 execution so interrupted or unacknowledged calls cannot resume or retry with
-unknown elapsed time. Legacy waiting records without elapsed time or physical
-session identity cannot resume by assuming zero. With coding Slack settings,
+unknown elapsed time. Native execution deadlines must cancel request-owned
+sandbox processes through the host cancellation path; a terminal timeout receipt
+alone does not establish that descendant processes stopped. Legacy waiting
+records without elapsed time or physical session identity cannot resume by assuming zero. With coding Slack settings,
 the Controller creates and retains one task root message before coding starts,
 including its channel, agent and authorized user IDs. Resume reuses that thread
 and rejects changed Slack settings. A confirmed waiting question is sent as a

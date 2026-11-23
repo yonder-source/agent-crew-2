@@ -183,6 +183,11 @@ cut the active budget short. Preserve the existing inspection boundary on an
 uncertain timeout. Report any unsupported waiting or resume behavior rather
 than claiming it has been implemented.
 
+The real 20-minute native deadline test exposed process cleanup bypassing the
+host abort path. The correction and short-deadline/native regression evidence
+are tracked in [active-time deadline qualification](evidence/wbs4.5-coding-timeout-qualification.md).
+The live runtime test is separate from Controller cumulative-time fixtures.
+
 **Slack interaction:** Configure Slack Socket Mode credentials as mounted
 secrets and display availability; provide coding and designer agent selectors,
 channel IDs and separate authorized Slack user ID lists. Validate both settings;
@@ -303,8 +308,10 @@ publish the coding result as a draft PR. WBS6 extends Slack and validates the MV
 
 Token accounting source inspection and a live read-only query are recorded in
 [token accounting qualification](evidence/wbs4.5-coding-token-qualification.md).
-Session context totals cannot serve as cumulative task usage. Retry/compaction
-coverage and live stop behavior remain prerequisites for token enforcement.
+Session context totals cannot serve as cumulative task usage. Later native
+accumulator regressions cover missing-attempt aggregation, and live
+process-tree termination is qualified in that evidence; unreported provider work
+remains outside observable accounting.
 
 The latest-turn runtime usage adapter and Controller status field are implemented
 and fixture-qualified. It supplies the cumulative guard described below;

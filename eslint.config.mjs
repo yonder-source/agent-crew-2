@@ -72,14 +72,14 @@ export default defineConfig([
     languageOptions: { globals: globals.browser },
   },
   {
-    // The mock boundary harness runs compiled dispatcher code in a VM.
-    files: ["scripts/check-dispatcher-boundaries.mjs", "scripts/check-coding-boundaries.mjs"],
+    // Boundary fixtures run compiled dispatcher or pinned native callbacks in a VM.
+    files: ["scripts/check-dispatcher-boundaries.mjs", "scripts/check-coding-boundaries.mjs", "scripts/check-native-timeout.mjs"],
     rules: {
       "no-restricted-imports": restrictImports([
         ...processLoaders, "child_process", "node:child_process",
         ...["vm", "node:vm"].map((name) => ({
           name, allowImportNames: ["createContext", "runInContext"],
-          message: "Only the compiled dispatcher VM harness operations are approved.",
+          message: "Only the reviewed boundary VM harness operations are approved.",
         })),
       ]),
     },

@@ -13,6 +13,8 @@ COPY scripts/patch-openclaw-usage.mjs /opt/agent-crew-patches/patch-openclaw-usa
 RUN node /opt/agent-crew-patches/patch-openclaw-usage.mjs
 COPY scripts/patch-openclaw-stop.mjs /opt/agent-crew-patches/patch-openclaw-stop.mjs
 RUN node /opt/agent-crew-patches/patch-openclaw-stop.mjs
+COPY scripts/patch-openclaw-timeout.mjs /opt/agent-crew-patches/patch-openclaw-timeout.mjs
+RUN node /opt/agent-crew-patches/patch-openclaw-timeout.mjs
 RUN npm install --prefix /opt/agent-crew-slack --omit=dev --legacy-peer-deps --ignore-scripts --no-audit --no-fund @openclaw/slack@2026.11.3 \
     && ln -s /app /opt/agent-crew-slack/node_modules/openclaw
 USER node
@@ -38,7 +40,7 @@ COPY --chown=node:node ui ./dist/control-ui/agent-crew
 
 FROM build AS checks
 COPY --chown=node:node . ./
-CMD ["sh", "-c", "npm run lint && npm run check:lint && npm run typecheck && sh -n scripts/check-all.sh && node scripts/check-config.mjs && node scripts/check-dispatcher-boundaries.mjs && node scripts/check-coding-boundaries.mjs && node scripts/check-coding-result.mjs && node scripts/check-native-usage.mjs && node scripts/check-native-stop.mjs && node scripts/check-coding-workflow.mjs && node scripts/check-wbs3.mjs && node scripts/check-repository-connection.mjs && node scripts/check-slack-credentials.mjs && node scripts/check-slack-settings.mjs && node scripts/check-slack-task-thread.mjs && node scripts/check-slack-task-reply.mjs"]
+CMD ["sh", "-c", "npm run lint && npm run check:lint && npm run typecheck && sh -n scripts/check-all.sh && node scripts/check-config.mjs && node scripts/check-dispatcher-boundaries.mjs && node scripts/check-coding-boundaries.mjs && node scripts/check-coding-result.mjs && node scripts/check-native-usage.mjs && node scripts/check-native-stop.mjs && node scripts/check-native-timeout.mjs && node scripts/check-coding-workflow.mjs && node scripts/check-wbs3.mjs && node scripts/check-repository-connection.mjs && node scripts/check-slack-credentials.mjs && node scripts/check-slack-settings.mjs && node scripts/check-slack-task-thread.mjs && node scripts/check-slack-task-reply.mjs"]
 
 FROM base AS runtime
 USER root
