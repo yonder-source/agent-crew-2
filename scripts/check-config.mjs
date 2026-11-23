@@ -34,6 +34,11 @@ assert.throws(
   () => parseConfig({ environment: { value: "test-secret" } }),
   (error) => error instanceof Error && !error.message.includes("test-secret"),
 );
+// Exercise the native manifest schema as well as the parser.
+codingExample.plugins.entries["agent-crew"].config.slack = {
+  coding: { agentId: "coding", channelId: "C123", userIds: ["U123"] },
+  designer: { agentId: "designer", channelId: "G456", userIds: ["U123"] },
+};
 const directory = mkdtempSync(join(tmpdir(), "agent-crew-config-"));
 try {
   const codingExamplePath = join(directory, "openclaw-coding.json");

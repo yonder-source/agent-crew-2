@@ -205,8 +205,9 @@ only on the Gateway. The setup page exposes admin-only file/type availability
 without token values. Native plugin packaging and a persistent Socket Mode
 connection are qualified separately in
 [native Slack connection evidence](evidence/wbs4.5-slack-socket-qualification.md).
-Applying saved channel/user settings through the setup UI and task-bound
-interaction remain outstanding. See
+Saved channel/user settings now have read-only validation and Apply persistence;
+see [settings validation evidence](evidence/wbs4.5-slack-settings-qualification.md).
+Live Gateway Apply and task-bound interaction remain outstanding. See
 [credential readiness evidence](evidence/wbs4.5-slack-credential-readiness.md).
 
 **Small batch 6 — Controller task authorization:** Extend the Controller's

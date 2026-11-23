@@ -13,6 +13,7 @@ import { codingPrompt } from "./coding-prompt.js";
 import { normalizeCodingValidation, isCodingDelivery, type CodingDelivery } from "./coding-result.js";
 import { validateCheckout, type ConnectionCheck } from "./repository-validation.js";
 import { connectionConfig } from "./setup-config.js";
+import { draftSlackSettings, validateSlackSettings } from "./slack-settings.js";
 import { slackCredentialStatus } from "./slack-credentials.js";
 
 const NAMESPACE = "agent-crew-job";
@@ -579,6 +580,11 @@ export default definePluginEntry({
             repository: config.github?.repository ?? "",
             repositoryPath: config.coding?.repositoryPath ?? "",
             codingAgentId: config.coding?.agentId ?? "",
+            codingChannelId: config.slack?.coding?.channelId ?? "",
+            codingUserIds: config.slack?.coding?.userIds.join(", ") ?? "",
+            designerAgentId: config.slack?.designer?.agentId ?? "",
+            designerChannelId: config.slack?.designer?.channelId ?? "",
+            designerUserIds: config.slack?.designer?.userIds.join(", ") ?? "",
           },
         });
       } catch {
@@ -627,6 +633,11 @@ export default definePluginEntry({
           if (id === "designer-agent" && agentId === "") continue;
           const exists = agents.some((agent) => isRecord(agent) && agent.id === agentId);
           checks.push({ id, status: exists ? "passed" : "failed", message: exists ? `Agent ${agentId} is configured.` : "Select an available agent." });
+        }
+        try {
+          checks.push(...await validateSlackSettings(draftSlackSettings(draft), (path) => readFile(path, "utf8")));
+        } catch {
+          checks.push({ id: "slack-settings", status: "failed", message: "Each Slack role requires an agent, channel ID and authorized user IDs." });
         }
         checks.push({ id: "writes", status: "unverified", message: "Push, issue writes and PR creation require separate live qualification." });
         return { checks, draftHash: createHash("sha256").update(JSON.stringify(draft)).digest("hex"),
@@ -692,13 +703,14 @@ export default definePluginEntry({
           const snapshot: unknown = await call("config.get", {});
           const replacement = connectionConfig(snapshot, {
             repository: draft.repository, appId: draft.githubAppId, installationId: Number(draft.installationId),
-            agentId: draft.codingAgentId, repositoryPath: draft.repositoryPath,
+            agentId: draft.codingAgentId, repositoryPath: draft.repositoryPath, slack: draftSlackSettings(draft),
           });
           const token = await githubApp.installationTokenForRepository(draft.githubAppId, Number(draft.installationId), draft.repository);
           await cloneRepository({ repository: draft.repository, repositoryPath: draft.repositoryPath, token });
           if (JSON.stringify(await readSetupDraft()) !== JSON.stringify(draft)) throw new Error("Draft changed during Apply; validate and apply again.");
           unchanged = config.github?.appId === draft.githubAppId && config.github.installationId === Number(draft.installationId) &&
-            config.github.repository === draft.repository && config.coding?.agentId === draft.codingAgentId && config.coding.repositoryPath === draft.repositoryPath;
+            config.github.repository === draft.repository && config.coding?.agentId === draft.codingAgentId && config.coding.repositoryPath === draft.repositoryPath &&
+            JSON.stringify(config.slack ?? {}) === JSON.stringify(draftSlackSettings(draft));
           if (unchanged) return;
           committing = true;
           await call("config.set", replacement);

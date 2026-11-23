@@ -8,6 +8,7 @@ import { GitHubAppError } from "../dist/github-app.js";
 import { IssueDiscovery } from "../dist/discovery.js";
 import { connectionConfig } from "../dist/setup-config.js";
 import { codingPrompt } from "../dist/coding-prompt.js";
+import { draftSlackSettings } from "../dist/slack-settings.js";
 import { slackCredentialStatus } from "../dist/slack-credentials.js";
 import { normalizeCodingValidation, isCodingDelivery } from "../dist/coding-result.js";
 
@@ -19,7 +20,7 @@ const repositoryPath = "/workspaces/repositories/owner/repo";
 const workspacePath = "/home/node/.openclaw/worktrees/fixture/issue-7";
 const branch = "openclaw/agent-crew-issue-7";
 
-function harness(initialSession = null, appMode = false) {
+function harness(initialSession = null, appMode = false, slackDraft = {}) {
   let session = initialSession;
   let codingStatus = "ok";
   let codingText = "Changed README; validation passed";
@@ -28,12 +29,13 @@ function harness(initialSession = null, appMode = false) {
   let failConfigPatch = false;
   let inventory = { sessions: [] };
   const setupDraft = { githubAppId: "123", repository: "owner/repo", installationId: "17", repositoryPath,
-    codingAgentId: "coding", designerAgentId: "", codingChannelId: "", designerChannelId: "", codingUserIds: "", designerUserIds: "", tokenBudget: "" };
+    codingAgentId: "coding", designerAgentId: "", codingChannelId: "", designerChannelId: "", codingUserIds: "", designerUserIds: "", tokenBudget: "", ...slackDraft };
   const calls = [];
   const methods = new Map();
   const registeredTools = new Map();
   const context = createContext({
-    TaskBaseError, createHash, randomUUID, codingPrompt, normalizeCodingValidation, isCodingDelivery, slackCredentialStatus,
+    TaskBaseError, createHash, randomUUID, codingPrompt, normalizeCodingValidation, isCodingDelivery, slackCredentialStatus, draftSlackSettings,
+    validateSlackSettings: async (settings) => Object.keys(settings).map(role => ({ id: `${role}-slack`, status: "passed", message: "Fixture verified" })),
     readFile: async () => "fixture-token",
     prepareTaskBase: async () => "a".repeat(40),
     verifyTaskWorkspace: async () => {},
@@ -253,6 +255,16 @@ assert.equal(replacement.agents.entries.coding.model, "fixture-model");
 assert.equal(replacement.gateway.auth.token, "__OPENCLAW_REDACTED__");
 assert.deepEqual(replacement.plugins.allow, ["agent-crew", "fixture-plugin"]);
 assert.equal(replacement.plugins.entries["fixture-plugin"].enabled, true);
+const slackApply = harness(null, true, { codingChannelId: "C123", codingUserIds: "U123" });
+const slackValidated = await slackApply.method("agent-crew.setup.validate", {});
+assert.equal(slackValidated.value.valid, true);
+assert.equal((await slackApply.method("agent-crew.setup.apply", { draftHash: slackValidated.value.draftHash })).ok, true);
+assert.deepEqual(JSON.parse(slackApply.calls.find(call => call.method === "config.set").params.raw)
+  .plugins.entries["agent-crew"].config.slack, { coding: { agentId: "coding", channelId: "C123", userIds: ["U123"] } });
+const malformedSlack = harness(null, true, { codingChannelId: "C123" });
+assert.equal((await malformedSlack.method("agent-crew.setup.validate", {})).value.valid, false);
+assert.equal((await malformedSlack.method("agent-crew.setup.apply", {})).ok, false);
+assert.equal(malformedSlack.calls.some(call => call.method === "config.set"), false);
 const activeApply = harness();
 activeApply.setInventory({ sessions: [{ key: "agent:coding:agent-crew-" + "a".repeat(32), hasActiveRun: true }] });
 assert.equal((await activeApply.method("agent-crew.setup.apply", {})).ok, false);

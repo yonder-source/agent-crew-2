@@ -1,3 +1,25 @@
+export function parseSlackSettings(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value) ||
+      Object.keys(value).some((key) => key !== "coding" && key !== "designer")) {
+    throw new Error("Slack settings are invalid.");
+  }
+  const settings = {};
+  for (const role of ["coding", "designer"]) {
+    const entry = value[role];
+    if (entry === undefined) continue;
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry) ||
+        Object.keys(entry).some((key) => !["agentId", "channelId", "userIds"].includes(key)) ||
+        typeof entry.agentId !== "string" || !/^[a-z][a-z0-9_-]*$/.test(entry.agentId) ||
+        typeof entry.channelId !== "string" || !/^[CG][A-Z0-9]+$/.test(entry.channelId) ||
+        !Array.isArray(entry.userIds) || entry.userIds.length === 0 || entry.userIds.length > 100 ||
+        entry.userIds.some((id) => typeof id !== "string" || !/^[UW][A-Z0-9]+$/.test(id))) {
+      throw new Error("Slack settings require an agent, channel ID and authorized user IDs.");
+    }
+    settings[role] = { agentId: entry.agentId, channelId: entry.channelId, userIds: [...new Set(entry.userIds)].sort() };
+  }
+  return settings;
+}
+
 export function parseConfig(value) {
   if (typeof value !== "object" || value === null || !("environment" in value)) {
     throw new Error("Agent Crew configuration requires an environment name.");
@@ -6,7 +28,8 @@ export function parseConfig(value) {
   if (typeof environment !== "string" || environment.trim().length === 0) {
     throw new Error("Agent Crew configuration requires a non-empty environment name.");
   }
-  const config = { environment: environment.trim() };
+  const config = { environment: environment.trim(),
+    ...(value.slack === undefined ? {} : { slack: parseSlackSettings(value.slack) }) };
   if (value.github === undefined) return config;
   const github = value.github;
   if (typeof github !== "object" || github === null || Array.isArray(github)) {

@@ -128,6 +128,15 @@ The Gateway image includes the matching native Slack plugin. Socket Mode reads
 its bot and app tokens through file SecretRefs and exposes connection health
 through native channel status. Keep generic DM/channel replies, slash commands
 and join introductions disabled until task-bound ingress is implemented.
+The setup draft validates each configured Slack role before Apply: require a
+configured agent, channel ID and nonempty authorized user ID list, verify that
+the bot belongs to an active channel, and verify active human user accounts.
+User lists accept comma or whitespace separators and are normalized on Apply.
+An empty channel and user list leaves that role unconfigured. Apply stores these
+settings in the Agent Crew configuration, preserving native Slack ingress policy
+and secret references; they do not enable designer execution or task routing.
+Slack-only changes pass the same active/uncertain work guard and runtime
+activation boundary as repository changes.
 Each coding task uses a bound thread. Status updates and requests for human input
 are distinct operations: only a confirmed transition to waiting stops the task's
 active-time clock. Accept the first authorized reply in the bound thread and
