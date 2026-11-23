@@ -120,6 +120,10 @@ WBS4.5 provides basic Slack Socket Mode setup and coding-task interaction.
 Configure separate coding and designer agents, Slack channel IDs and authorized
 Slack user IDs; designer execution remains later scope. Store Slack credentials
 as mounted secrets and show their availability without returning secret values.
+The optional local Slack overlay mounts separate bot and app token files only
+on the Gateway. The operator setup page reports each file as available, missing,
+invalid or unavailable; available means readable with the expected token type,
+not authenticated or connected to Slack. Status reads require operator admin.
 Each coding task uses a bound thread. Status updates and requests for human input
 are distinct operations: only a confirmed transition to waiting stops the task's
 active-time clock. Accept the first authorized reply in the bound thread and

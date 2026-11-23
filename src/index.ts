@@ -13,6 +13,7 @@ import { codingPrompt } from "./coding-prompt.js";
 import { normalizeCodingValidation, isCodingDelivery, type CodingDelivery } from "./coding-result.js";
 import { validateCheckout, type ConnectionCheck } from "./repository-validation.js";
 import { connectionConfig } from "./setup-config.js";
+import { slackCredentialStatus } from "./slack-credentials.js";
 
 const NAMESPACE = "agent-crew-job";
 const JOB_STATUSES = ["starting", "active", "completed", "needs-inspection", "retry-approved", "abandoned"] as const;
@@ -560,6 +561,10 @@ export default definePluginEntry({
       },
     };
     api.registerTool(statusTool);
+
+    api.registerGatewayMethod("agent-crew.setup.slack.credentials", async ({ respond }) => {
+      respond(true, await slackCredentialStatus((path) => readFile(path, "utf8")));
+    }, { scope: "operator.admin" });
 
     // A draft is not an active configuration and cannot initiate a restart.
     api.registerGatewayMethod("agent-crew.setup.draft.get", async ({ respond }) => {

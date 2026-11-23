@@ -17,6 +17,8 @@ function call(method, params = {}) {
   return JSON.parse(result.stdout);
 }
 
+assert.deepEqual(call("agent-crew.setup.slack.credentials"), { botToken: "missing", appToken: "missing" });
+
 if (!process.argv.includes("--verify-only")) {
   const catalog = call("plugins.controlUi.list");
   const plugin = catalog.plugins.find((item) => item.pluginId === "agent-crew");
@@ -30,6 +32,8 @@ if (!process.argv.includes("--verify-only")) {
   assert.deepEqual(after.current, before.current, "Saving a draft must not apply settings");
   const options = { url: "ws://127.0.0.1:18789", token, timeout: "30000", json: true };
   await assert.rejects(callGatewayFromCli("agent-crew.setup.draft.get", options, {},
+    { scopes: ["operator.read"] }), /operator.admin/);
+  await assert.rejects(callGatewayFromCli("agent-crew.setup.slack.credentials", options, {},
     { scopes: ["operator.read"] }), /operator.admin/);
   await assert.rejects(callGatewayFromCli("agent-crew.setup.draft.save", options, { draft },
     { scopes: ["operator.read"] }), /operator.admin/);

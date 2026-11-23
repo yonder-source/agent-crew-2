@@ -93,6 +93,29 @@ function mount(container, { host, signal }) {
   resume.textContent = "Resume scheduling";
   const pollingStatus = document.createElement("p");
   status.append(resume, pollingStatus);
+  const slackHeading = document.createElement("h2");
+  slackHeading.textContent = "Slack credentials";
+  const slackStatus = document.createElement("p");
+  slackStatus.setAttribute("role", "status");
+  const refreshSlack = document.createElement("button");
+  refreshSlack.type = "button";
+  refreshSlack.textContent = "Check Slack credentials";
+  status.append(slackHeading, slackStatus, refreshSlack);
+  const checkSlack = async () => {
+    refreshSlack.disabled = true;
+    slackStatus.textContent = "Checking mounted Slack credentials…";
+    try {
+      const result = await host.request("agent-crew.setup.slack.credentials", {});
+      if (!signal.aborted) {
+        slackStatus.textContent = `Bot token: ${result.botToken}. App token: ${result.appToken}. File readiness only; Slack connection not checked.`;
+      }
+    } catch {
+      if (!signal.aborted) slackStatus.textContent = "Slack credential status unavailable.";
+    } finally {
+      if (!signal.aborted) refreshSlack.disabled = false;
+    }
+  };
+  refreshSlack.addEventListener("click", () => { void checkSlack(); });
   const hint = document.createElement("p");
   hint.textContent = "Save validates a draft. Apply prepares the checkout and starts automatic scheduling; active or uncertain tasks block it.";
   status.append(hint);
@@ -199,7 +222,7 @@ function mount(container, { host, signal }) {
         inputs.get("codingAgentId").value = "coding";
       }
       save.disabled = false;
-      await refreshPolling();
+      await Promise.all([refreshPolling(), checkSlack()]);
     } catch {
       if (!signal.aborted) feedback.textContent = "Unable to load setup or agents.";
     }

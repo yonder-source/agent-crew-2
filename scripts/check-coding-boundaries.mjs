@@ -8,6 +8,7 @@ import { GitHubAppError } from "../dist/github-app.js";
 import { IssueDiscovery } from "../dist/discovery.js";
 import { connectionConfig } from "../dist/setup-config.js";
 import { codingPrompt } from "../dist/coding-prompt.js";
+import { slackCredentialStatus } from "../dist/slack-credentials.js";
 import { normalizeCodingValidation, isCodingDelivery } from "../dist/coding-result.js";
 
 const source = readFileSync("dist/index.js", "utf8")
@@ -32,7 +33,7 @@ function harness(initialSession = null, appMode = false) {
   const methods = new Map();
   const registeredTools = new Map();
   const context = createContext({
-    TaskBaseError, createHash, randomUUID, codingPrompt, normalizeCodingValidation, isCodingDelivery,
+    TaskBaseError, createHash, randomUUID, codingPrompt, normalizeCodingValidation, isCodingDelivery, slackCredentialStatus,
     readFile: async () => "fixture-token",
     prepareTaskBase: async () => "a".repeat(40),
     verifyTaskWorkspace: async () => {},
@@ -118,6 +119,7 @@ function harness(initialSession = null, appMode = false) {
   }
   return {
     calls,
+    methodScope(name) { return methods.get(name).options.scope; },
     setInventory(value) { inventory = value; },
     failConfigPatch() { failConfigPatch = true; },
     method,
@@ -134,6 +136,9 @@ function harness(initialSession = null, appMode = false) {
 }
 
 const success = harness();
+assert.equal(success.methodScope("agent-crew.setup.slack.credentials"), "operator.admin");
+assert.deepEqual((await success.method("agent-crew.setup.slack.credentials", {})).value,
+  { botToken: "invalid", appToken: "invalid" });
 const first = await success.method("agent-crew.dispatch", issue);
 assert.equal(first.ok, true);
 assert.equal(first.value.job.status, "completed");

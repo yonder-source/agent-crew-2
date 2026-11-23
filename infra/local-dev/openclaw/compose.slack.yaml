@@ -1,0 +1,13 @@
+services:
+  gateway:
+    secrets:
+      - source: slack_bot_token
+        target: agent-crew-slack-bot-token
+      - source: slack_app_token
+        target: agent-crew-slack-app-token
+
+secrets:
+  slack_bot_token:
+    file: ../../../.local/secrets/slack-bot-token
+  slack_app_token:
+    file: ../../../.local/secrets/slack-app-token

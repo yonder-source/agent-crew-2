@@ -199,6 +199,14 @@ delivery remains visible and leaves the task waiting. Automatic delivery retry
 is WBS6 scope. Qualify native session context across turns before adding a
 worktree context summary; add one only if a concrete gap is found.
 
+Credential readiness is a separate small batch: optional `compose.slack.yaml`
+mounts `.local/secrets/slack-bot-token` and `.local/secrets/slack-app-token`
+only on the Gateway. The setup page exposes admin-only file/type availability
+without token values. This establishes local provisioning readiness; native
+Slack configuration, Socket Mode connection and task interaction still need
+implementation and live qualification. See
+[credential readiness evidence](evidence/wbs4.5-slack-credential-readiness.md).
+
 **Small batch 6 — Controller task authorization:** Extend the Controller's
 coding prompt with a structured authorization block naming the assigned issue,
 repository, worktree and branch, and the allowed edit/validation/assigned-issue

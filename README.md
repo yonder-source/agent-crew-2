@@ -178,6 +178,22 @@ retrying it. The Controller reads the current PEM when creating each App JWT;
 it does not keep the private key or installation token in a retained store.
 See [GitHub's private-key rotation documentation](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/managing-private-keys-for-github-apps).
 
+## Slack credential readiness
+
+Provision the Slack bot token in `.local/secrets/slack-bot-token` and the
+Socket Mode app token in `.local/secrets/slack-app-token`. Keep them out of Git
+and readable by the Gateway user. Add
+`-f infra/local-dev/openclaw/compose.slack.yaml` to the existing Compose command
+when recreating the Gateway to mount both files read-only as Docker secrets.
+Only the Gateway receives these mounts.
+
+The setup page's **Slack credentials** area checks readability and expected
+token type, with a button to repeat the check. Values and raw filesystem errors
+are never returned. `Available` means file readiness, not successful Slack
+authentication. Slack plugin setup, channel/user settings and the Socket Mode
+connection are a subsequent batch; mounting these files alone does not enable
+Slack ingress. The optional overlay requires both files to exist.
+
 ## Local coding workflow
 
 This example uses legacy token-file credentials; the setup overlay above provides
