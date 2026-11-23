@@ -208,19 +208,20 @@ connection are qualified separately in
 Saved channel/user settings now have read-only validation and Apply persistence;
 see [settings validation evidence](evidence/wbs4.5-slack-settings-qualification.md).
 Live Gateway Validate/Apply and restart persistence are qualified through the
-authenticated setup RPCs; browser interaction and task-bound interaction remain
-outstanding. See
+authenticated setup RPCs; browser interaction remains outstanding. Task-bound
+interaction is qualified in the later live evidence below. See
 [credential readiness evidence](evidence/wbs4.5-slack-credential-readiness.md).
 
 The coding-result waiting boundary is implemented separately: a final
 `requestInput` question becomes retained `waiting` only after the exact native
 run is confirmed stopped, without committing a delivery. Waiting blocks duplicate
 admission, assigned-issue operations and configuration Apply. Native model turns
-have been qualified for same-session/worktree context continuity, but Slack
-thread routing and token budgets remain outstanding. Operator-admin resume now
+have been qualified for same-session/worktree context continuity. Slack thread
+routing is now live-qualified; token budgets remain outstanding. Operator-admin resume now
 reuses the retained job/session/worktree, rejects concurrent/stale replies and
-uses the remaining cumulative active-time budget. This path is fixture-qualified,
-not deployed; see [resume evidence](evidence/wbs4.5-coding-resume-qualification.md).
+uses the remaining cumulative active-time budget. It is now deployed and
+live-qualified through the Slack adapter; earlier fixture details remain in
+[resume evidence](evidence/wbs4.5-coding-resume-qualification.md).
 Task root creation and input-request replies now retain the Slack thread and
 write intent/delivery state in task metadata; failed input delivery stays waiting,
 and uncertain writes are not replayed. This is application-owned thread metadata,
@@ -295,3 +296,8 @@ result and its assigned worktree; WBS5 validates the resulting draft PR.
 
 [WBS5](wbs5.md) uses the configured connection and Git authentication to
 publish the coding result as a draft PR. WBS6 extends Slack and validates the MVP.
+
+Token accounting source inspection and a live read-only query are recorded in
+[token accounting qualification](evidence/wbs4.5-coding-token-qualification.md).
+Session context totals cannot serve as cumulative task usage. Retry/compaction
+coverage and live stop behavior remain prerequisites for token enforcement.

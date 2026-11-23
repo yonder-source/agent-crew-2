@@ -178,7 +178,11 @@ Slack connection must be resent. This ingress path passed a real authorized-huma
 resumption qualification, including validated committed delivery and replay
 protection. Native admission is enabled only for the configured coding channel
 and authorized user allowlist. Provider
-token accounting still needs integration.
+token accounting still needs integration. A read-only qualification confirmed
+that session-row totalTokens measures context rather than cumulative task usage;
+sessions.usage exposes a distinct aggregate. Retry/compaction coverage, missing
+usage detection and live stop behavior remain unqualified; see
+[token accounting evidence](docs/restart/evidence/wbs4.5-coding-token-qualification.md).
 Each coding task uses a bound thread. Status updates and requests for human input
 are distinct operations: only a confirmed transition to waiting stops the task's
 active-time clock. Accept the first authorized reply in the bound thread and
