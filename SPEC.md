@@ -300,7 +300,10 @@ starting coding turns. The Gateway image includes a Docker CLI and joins the
 host Docker socket group.
 
 WBS4.5 makes skills in the host's `.local/skills` available read-only to each
-coding sandbox alongside its assigned worktree. Qualify the pinned runtime's
+coding sandbox alongside its assigned worktree. The local setup mounts this
+directory read-only at `/opt/agent-crew-skills` and registers it through native
+`skills.load.extraDirs`; use native sandbox skill materialization and protected
+read-only mounts rather than copying skills into task Git history. Qualify the pinned runtime's
 skill discovery and sandbox access, including compatibility of the intended
 skills and any required supporting files. Do not expose other host directories
 or credentials through this mount. Installing or removing skills through a UI

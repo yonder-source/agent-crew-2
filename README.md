@@ -169,3 +169,18 @@ The `coding` overlay mounts the local config read-only; `compose.github.yaml`
 mounts the installation token and App private key as Gateway secrets. Never put
 credential values in the config file. Stop and remove the disposable runtime
 with the same Compose files and `down` when finished.
+
+
+### Local skills
+
+The local base Compose file mounts `.local/skills` read-only at
+`/opt/agent-crew-skills`. Root `openclaw.json` and the coding example add that directory to native
+`skills.load.extraDirs`; preserve existing entries when enabling it in a retained
+Gateway config. Keep each skill in its own directory containing `SKILL.md` and
+its supporting files. An empty directory means no additional local skills.
+The local directory remains ignored by Git and excluded from the image context.
+
+Native OpenClaw discovers these skills and materializes sandbox-readable copies
+in its protected skills workspace. Source discovery alone does not establish
+that a particular harness can use a skill or execute its supporting tools.
+Skill installation/removal UI remains later scope.

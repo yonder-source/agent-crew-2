@@ -144,7 +144,8 @@ setup prerequisite and the secret delivery and rotation responsibilities.
 
 ## 4.5.5 Acceptance and handoff
 
-**Skills:** Make the skills under the host's `.local/skills` available read-only
+**Skills:** Implementation and live qualification are recorded in
+[local skill delivery evidence](evidence/wbs4.5-skills-qualification.md). Make the skills under the host's `.local/skills` available read-only
 to each coding sandbox alongside its assigned worktree. First qualify the pinned
 OpenClaw runtime's supported discovery and sandbox mounting mechanisms, and
 check that intended skills and their supporting files can be read without exposing

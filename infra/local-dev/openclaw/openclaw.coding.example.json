@@ -6,7 +6,9 @@
       "token": "${OPENCLAW_GATEWAY_TOKEN}"
     },
     "controlUi": {
-      "experimental": { "customPlugins": true }
+      "experimental": {
+        "customPlugins": true
+      }
     }
   },
   "plugins": {
@@ -88,5 +90,12 @@
       }
     },
     "ownership": "explicit"
+  },
+  "skills": {
+    "load": {
+      "extraDirs": [
+        "/opt/agent-crew-skills"
+      ]
+    }
   }
 }
