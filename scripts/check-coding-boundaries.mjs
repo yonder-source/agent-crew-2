@@ -23,6 +23,12 @@ const sessionKeyForFixture = "agent:coding:agent-crew-" + createHash("sha256").u
 
 function harness(initialSession = null, appMode = false, slackDraft = {}) {
   let session = initialSession;
+  const extraSessions = new Map();
+  let clock = 0;
+  let turnMs = 1_234;
+  let heldRun;
+  let releaseRun;
+  let runId = "run-7";
   let codingStatus = "ok";
   let requestInput;
   let hasActiveRun = false;
@@ -37,7 +43,7 @@ function harness(initialSession = null, appMode = false, slackDraft = {}) {
   const calls = [];
   const methods = new Map();
   const registeredTools = new Map();
-  const context = createContext({
+  const context = createContext({ performance: { now: () => clock },
     TaskBaseError, createHash, randomUUID, codingPrompt, normalizeCodingValidation, isCodingDelivery, slackCredentialStatus, draftSlackSettings,
     validateSlackSettings: async (settings) => Object.keys(settings).map(role => ({ id: `${role}-slack`, status: "passed", message: "Fixture verified" })),
     readFile: async () => "fixture-token",
@@ -84,10 +90,11 @@ function harness(initialSession = null, appMode = false, slackDraft = {}) {
         if (failConfigPatch) throw new Error("Simulated config commit transport failure");
         return { ok: true };
       }
+      if (method === "sessions.describe" && extraSessions.has(params.key)) return { session: extraSessions.get(params.key) };
       if (method === "sessions.describe") return { session: session ? { ...session, key: sessionKeyForFixture, lastRunId: stoppedRunId, hasActiveRun } : null };
       if (method === "sessions.create") {
         session = {
-          sessionRoot: workspacePath,
+          sessionRoot: workspacePath, sessionId: "native-session-7",
           worktree: { repoRoot: repositoryPath, branch },
           pluginExtensions: [],
         };
@@ -97,13 +104,18 @@ function harness(initialSession = null, appMode = false, slackDraft = {}) {
         session.pluginExtensions = [{ pluginId: "agent-crew", namespace: "agent-crew-job", value: params.value }];
         return {};
       }
-      if (method === "tools.invoke") return { ok: true, output: { details: {
+      if (method === "tools.invoke") {
+        if (heldRun) await heldRun;
+        clock += turnMs;
+        if (stoppedRunId === "run-7") stoppedRunId = runId;
+        return { ok: true, output: { details: {
         ok: true, status: "ok", output: [{
-          runId: "run-7", status: codingStatus, text: codingText,
+          runId, status: codingStatus, text: codingText,
           workspacePath, workspaceBranch: branch, validation: codingValidation, headCommit: "untrusted-agent-head",
           ...(requestInput !== undefined ? { requestInput } : {}),
         }],
       } } };
+      }
       throw new Error(`Unexpected method: ${method}`);
     },
   });
@@ -128,6 +140,7 @@ function harness(initialSession = null, appMode = false, slackDraft = {}) {
     calls,
     methodScope(name) { return methods.get(name).options.scope; },
     setInventory(value) { inventory = value; },
+    addSession(key, value) { extraSessions.set(key, value); },
     failConfigPatch() { failConfigPatch = true; },
     method,
     async status() {
@@ -141,6 +154,11 @@ function harness(initialSession = null, appMode = false, slackDraft = {}) {
     failDelivery() { deliveryFailure = true; },
     requestInput(value, active = false) { requestInput = value; hasActiveRun = active; },
     setStoppedRun(value) { stoppedRunId = value; },
+    setRunId(value) { runId = value; stoppedRunId = value; },
+    setTurnMs(value) { turnMs = value; },
+    advanceClock(value) { clock += value; },
+    holdRun() { heldRun = new Promise(resolve => { releaseRun = resolve; }); },
+    releaseRun() { releaseRun(); heldRun = undefined; },
   };
 }
 
@@ -212,7 +230,7 @@ assert.equal(dirtyJob.codingDelivery.headCommit, undefined);
 assert.equal(dirtyJob.codingDelivery.reason, "worktree-unverified");
 
 const orphan = harness({
-  sessionRoot: workspacePath,
+  sessionRoot: workspacePath, sessionId: "native-session-7",
   worktree: { repoRoot: repositoryPath, branch },
   pluginExtensions: [],
 });
@@ -311,7 +329,8 @@ assert.equal(waited.value.job.codingDelivery, undefined);
 assert.equal(waiting.calls.some(call => call.method === "verify-delivery"), false);
 assert.equal((await waiting.method("agent-crew.dispatch", issue)).value.job.jobId, waited.value.job.jobId);
 assert.equal(waiting.calls.filter(call => call.method === "tools.invoke").length, 1);
-const waitingRestart = harness(waiting.session());
+const waitingSnapshot = structuredClone(waiting.session());
+const waitingRestart = harness(structuredClone(waitingSnapshot));
 assert.equal((await waitingRestart.status()).details.job.status, "waiting");
 assert.equal((await waitingRestart.status()).details.job.inputRequest, "Choose the expected behavior");
 waitingRestart.setInventory({ sessions: [{ key: waited.value.job.sessionKey, hasActiveRun: false }] });
@@ -336,3 +355,96 @@ failedWait.requestInput("Need confirmation");
 failedWait.setCoding("error");
 assert.equal((await failedWait.method("agent-crew.dispatch", issue)).value.job.status, "needs-inspection");
 assert.throws(() => assignedIssueFromSession(waiting.session(), waited.value.job.sessionKey, "owner/repo", "boot"), /assignment/);
+
+const resumeParams = { ...issue, expectedRunId: waited.value.job.codingRunId, input: "Use the smaller change." };
+assert.equal(waitingRestart.methodScope("agent-crew.resume"), "operator.admin");
+waitingRestart.advanceClock(86_400_000); // Human waiting time must not consume active time.
+waitingRestart.setTurnMs(2_000);
+waitingRestart.setRunId("run-8");
+// Native lastRunId must still point at the waiting run during admission.
+waitingRestart.setStoppedRun("run-7");
+const resumedInput = await waitingRestart.method("agent-crew.resume", resumeParams);
+assert.equal(resumedInput.ok, true);
+assert.equal(resumedInput.value.job.status, "completed");
+assert.equal(resumedInput.value.job.jobId, waited.value.job.jobId);
+assert.equal(resumedInput.value.job.activeMs, 3_234);
+assert.equal(resumedInput.value.job.sessionKey, waited.value.job.sessionKey);
+assert.equal(resumedInput.value.job.baseCommit, waited.value.job.baseCommit);
+assert.equal(resumedInput.value.job.inputRequest, undefined);
+assert.equal(waitingRestart.calls.some(call => call.method === "sessions.create"), false);
+const resumedArgs = JSON.parse(waitingRestart.calls.find(call => call.method === "tools.invoke").params.args.argsJson);
+assert.equal(resumedArgs.timeoutSeconds, "1198");
+assert.ok(resumedArgs.prompt.includes("Use the smaller change."));
+assert.equal((await waitingRestart.method("agent-crew.resume", resumeParams)).ok, false);
+assert.equal(waitingRestart.calls.filter(call => call.method === "tools.invoke").length, 1);
+
+const concurrentResume = harness(structuredClone(waitingSnapshot));
+concurrentResume.setInventory({ sessions: [{ key: waited.value.job.sessionKey, hasActiveRun: false }] });
+concurrentResume.holdRun();
+const resumeInFlight = concurrentResume.method("agent-crew.resume", resumeParams);
+const busy = await concurrentResume.method("agent-crew.resume", resumeParams);
+assert.equal(busy.ok, false);
+assert.match(busy.error.message, /busy/);
+concurrentResume.releaseRun();
+assert.equal((await resumeInFlight).ok, true);
+assert.equal(concurrentResume.calls.filter(call => call.method === "tools.invoke").length, 1);
+
+for (const mutate of [
+  job => { job.activeMs = 1_200_000; },
+  job => { delete job.activeMs; },
+  job => { job.connection.repositoryPath = "/other/repository"; },
+  job => { job.codingSessionId = "different-native-session"; },
+]) {
+  const copy = structuredClone(waitingSnapshot);
+  mutate(copy.pluginExtensions[0].value);
+  const blocked = harness(copy);
+  blocked.setInventory({ sessions: [{ key: waited.value.job.sessionKey, hasActiveRun: false }] });
+  const result = await blocked.method("agent-crew.resume", resumeParams);
+  assert.ok(!result.ok || result.value.job.status === "needs-inspection");
+  assert.equal(blocked.calls.some(call => call.method === "tools.invoke"), false);
+}
+const overBudget = harness();
+overBudget.setTurnMs(1_200_000);
+assert.equal((await overBudget.method("agent-crew.dispatch", issue)).value.job.status, "needs-inspection");
+assert.equal(overBudget.calls.some(call => call.method === "verify-delivery"), false);
+
+const pausedResume = harness(structuredClone(waitingSnapshot), true);
+pausedResume.setInventory({ sessions: [{ key: waited.value.job.sessionKey, hasActiveRun: false }] });
+assert.equal((await pausedResume.method("agent-crew.resume", resumeParams)).ok, true,
+  "A retained waiting task can resume after restart without reopening new admission");
+assert.equal((await pausedResume.method("agent-crew.setup.polling.status", {})).value.running, false);
+const unknownTime = structuredClone(waitingSnapshot);
+unknownTime.pluginExtensions[0].value.status = "retry-approved";
+unknownTime.pluginExtensions[0].value.activeTimeUncertain = true;
+const unknownRetry = harness(unknownTime);
+unknownRetry.setInventory({ sessions: [{ key: waited.value.job.sessionKey, hasActiveRun: false }] });
+assert.equal((await unknownRetry.method("agent-crew.dispatch", issue)).ok, false);
+assert.equal(unknownRetry.calls.some(call => call.method === "tools.invoke"), false);
+
+const anotherQuestion = harness(structuredClone(waitingSnapshot));
+anotherQuestion.setInventory({ sessions: [{ key: waited.value.job.sessionKey, hasActiveRun: false }] });
+anotherQuestion.setRunId("run-8");
+anotherQuestion.setStoppedRun("run-7");
+anotherQuestion.requestInput("A second question");
+assert.equal((await anotherQuestion.method("agent-crew.resume", resumeParams)).value.job.status, "waiting");
+assert.equal((await anotherQuestion.method("agent-crew.resume", resumeParams)).ok, false,
+  "A delayed reply for the prior question must not answer a new question");
+assert.equal(anotherQuestion.calls.filter(call => call.method === "tools.invoke").length, 1);
+const interrupted = structuredClone(waitingSnapshot);
+Object.assign(interrupted.pluginExtensions[0].value, { status: "starting", bootId: "prior-process", activeTimeUncertain: true });
+const interruptedRestart = harness(interrupted);
+assert.equal((await interruptedRestart.status()).details.job.status, "needs-inspection");
+assert.equal((await interruptedRestart.status()).details.job.activeTimeUncertain, true);
+assert.equal((await interruptedRestart.method("agent-crew.resume", resumeParams)).ok, false);
+
+const otherWaitingKey = "agent:coding:agent-crew-" + "c".repeat(32);
+const otherWaiting = structuredClone(waitingSnapshot);
+Object.assign(otherWaiting, { key: otherWaitingKey, hasActiveRun: false });
+Object.assign(otherWaiting.pluginExtensions[0].value, { jobId: "other-job", sessionKey: otherWaitingKey });
+const multipleWaiters = harness(structuredClone(waitingSnapshot));
+multipleWaiters.addSession(otherWaitingKey, otherWaiting);
+multipleWaiters.setInventory({ sessions: [
+  { key: waited.value.job.sessionKey, hasActiveRun: false }, { key: otherWaitingKey, hasActiveRun: false },
+] });
+assert.equal((await multipleWaiters.method("agent-crew.resume", resumeParams)).ok, true,
+  "Another stopped waiting task must not deadlock task resumption");

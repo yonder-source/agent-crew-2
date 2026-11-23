@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import { readFile } from "node:fs/promises";
 import { Type } from "typebox";
 import { callGatewayFromCli } from "openclaw/plugin-sdk/gateway-runtime";
@@ -17,6 +18,7 @@ import { draftSlackSettings, validateSlackSettings } from "./slack-settings.js";
 import { slackCredentialStatus } from "./slack-credentials.js";
 
 const NAMESPACE = "agent-crew-job";
+const TASK_ACTIVE_LIMIT_MS = 1_200_000;
 const JOB_STATUSES = ["starting", "active", "waiting", "completed", "needs-inspection", "retry-approved", "abandoned"] as const;
 const WORKFLOW_STATUSES = ["ok", "needs_approval", "needs_input", "cancelled"] as const;
 type JobStatus = typeof JOB_STATUSES[number];
@@ -74,6 +76,10 @@ type Job = Issue & {
   codingRunStatus?: string;
   codingSummary?: string;
   inputRequest?: string;
+  activeMs?: number;
+  activeTimeUncertain?: boolean;
+  codingSessionId?: string;
+  connection?: { agentId: string; repositoryPath: string };
   workspacePath?: string;
   workspaceBranch?: string;
   baseCommit?: string;
@@ -103,6 +109,10 @@ function isJob(value: unknown): value is Job {
       (value.workflowStatus !== undefined && !isWorkflowStatus(value.workflowStatus)) ||
       (value.codingRunId !== undefined && typeof value.codingRunId !== "string") ||
       (value.codingRunStatus !== undefined && typeof value.codingRunStatus !== "string") ||
+      (value.codingSessionId !== undefined && (typeof value.codingSessionId !== "string" || !value.codingSessionId)) ||
+      (value.activeTimeUncertain !== undefined && typeof value.activeTimeUncertain !== "boolean") ||
+      (value.activeMs !== undefined && (typeof value.activeMs !== "number" || !Number.isSafeInteger(value.activeMs) || value.activeMs < 0)) ||
+      (value.connection !== undefined && (!isRecord(value.connection) || typeof value.connection.agentId !== "string" || typeof value.connection.repositoryPath !== "string")) ||
       (value.inputRequest !== undefined && (typeof value.inputRequest !== "string" || !value.inputRequest.trim() || value.inputRequest.length > 4_000)) ||
       (value.status === "waiting" && (typeof value.inputRequest !== "string" || value.codingRunStatus !== "ok" ||
         typeof value.codingRunId !== "string" || !value.codingRunId || typeof value.workspacePath !== "string" ||
@@ -132,6 +142,8 @@ function publicJob(job: Job) {
     ...(job.workflowStatus !== undefined ? { workflowStatus: job.workflowStatus } : {}),
     ...(job.codingRunId !== undefined ? { codingRunId: job.codingRunId } : {}),
     ...(job.codingRunStatus !== undefined ? { codingRunStatus: job.codingRunStatus } : {}),
+    ...(job.activeTimeUncertain !== undefined ? { activeTimeUncertain: job.activeTimeUncertain } : {}),
+    ...(job.activeMs !== undefined ? { activeMs: job.activeMs, activeTimeLimitMs: TASK_ACTIVE_LIMIT_MS } : {}),
     ...(job.inputRequest !== undefined ? { inputRequest: job.inputRequest } : {}),
     ...(job.codingSummary !== undefined ? { codingSummary: job.codingSummary } : {}),
     ...(job.workspacePath !== undefined ? { workspacePath: job.workspacePath } : {}),
@@ -299,7 +311,7 @@ export default definePluginEntry({
       };
     };
 
-    const assertNoActiveCodingTasks = async (approvedRetryJobId?: string): Promise<void> => {
+    const assertNoActiveCodingTasks = async (approvedRetryJobId?: string, resuming = false): Promise<void> => {
       let approvedRetryFound = false;
       const response: unknown = await call("sessions.list", { archived: "all", limit: 5000 });
       if (!isRecord(response) || !Array.isArray(response.sessions) || response.sessions.length >= 5000) {
@@ -338,9 +350,11 @@ export default definePluginEntry({
           throw new Error("Coding task state is uncertain; repository checkout is blocked.");
         }
         const job = jobValue;
-        const approvedRetry = job.status === "retry-approved" && job.jobId === approvedRetryJobId;
+        const approvedRetry = (job.status === "retry-approved" || (resuming && job.status === "waiting")) && job.jobId === approvedRetryJobId;
         if (approvedRetry) approvedRetryFound = true;
-        if ((!approvedRetry && ["starting", "active", "waiting", "needs-inspection", "retry-approved"].includes(job.status)) ||
+        const blockingStatuses = resuming ? ["starting", "active", "needs-inspection", "retry-approved"]
+          : ["starting", "active", "waiting", "needs-inspection", "retry-approved"];
+        if ((!approvedRetry && blockingStatuses.includes(job.status)) ||
             (job.issueUpdate !== undefined && ["writing", "needs-inspection", "retry-approved", "abandoned"].includes(job.issueUpdate.status))) {
           throw new Error("An Agent Crew coding task is active or uncertain; repository checkout is blocked.");
         }
@@ -357,9 +371,10 @@ export default definePluginEntry({
       status: "starting",
       bootId,
       updatedAt: new Date().toISOString(),
+      ...(config.coding ? { activeMs: 0, connection: { agentId: config.coding.agentId, repositoryPath: config.coding.repositoryPath } } : {}),
     });
 
-    const dispatchIssue = (issue: Issue, operatorRetry = false): Promise<Job> => {
+    const dispatchIssue = (issue: Issue, operatorRetry = false, resume?: { expectedRunId: string; input: string }): Promise<Job> => {
       const requestedEpoch = admissionEpoch;
       const admissionWasOpen = !setupApplying && pollingReady;
       pendingDispatches += 1;
@@ -370,11 +385,28 @@ export default definePluginEntry({
       const session = describe(issue);
       const existing = await readJob(issue, session);
       const approvedRetry = operatorRetry && existing?.status === "retry-approved";
-      if ((!admissionWasOpen || !pollingReady) && !approvedRetry) {
+      if (resume) {
+        if (!existing || existing.status !== "waiting" || existing.codingRunId !== resume.expectedRunId ||
+            !config.coding || !config.github || issue.repository !== config.github.repository ||
+            existing.connection?.agentId !== config.coding.agentId || existing.connection.repositoryPath !== config.coding.repositoryPath ||
+            existing.activeMs === undefined || existing.activeTimeUncertain === true) throw new Error("Waiting task binding or elapsed usage requires inspection.");
+        const view = await session;
+        if (!view || !existing.codingSessionId || view.session.sessionId !== existing.codingSessionId ||
+            view.session.lastRunId !== resume.expectedRunId || view.session.hasActiveRun !== false ||
+            (Array.isArray(view.session.activeRunIds) && view.session.activeRunIds.length > 0) ||
+            (view.session.workspaceDir ?? view.session.sessionRoot) !== existing.workspacePath) {
+          throw new Error("Native session changed or stopped state is unknown; inspect before resuming.");
+        }
+        await assertNoActiveCodingTasks(existing.jobId, true);
+      }
+      if ((!admissionWasOpen || !pollingReady) && !approvedRetry && !resume) {
         throw new Error("Issue admission is paused while repository settings are being applied.");
       }
-      if (approvedRetry && config.coding) await assertNoActiveCodingTasks(existing.jobId);
-      if (existing && LOCKED.has(existing.status)) return existing;
+      if (approvedRetry && config.coding) {
+        if (existing.activeTimeUncertain === true) throw new Error("Interrupted active time is unknown; inspect usage before retrying.");
+        await assertNoActiveCodingTasks(existing.jobId);
+      }
+      if (existing && LOCKED.has(existing.status) && !resume) return existing;
       let workspace: { path: string; branch: string } | undefined;
       let baseCommit = existing?.baseCommit;
       if ((await session) === null) {
@@ -427,16 +459,27 @@ export default definePluginEntry({
           throw new Error("Coding session lacks a recorded workspace or base commit; operator inspection is required");
         }
       }
+      const usedMs = existing?.activeMs ?? 0;
+      const remainingSeconds = Math.floor((TASK_ACTIVE_LIMIT_MS - usedMs) / 1000);
+      if (config.coding && remainingSeconds < 1) {
+        if (!existing) throw new Error("Task active-time budget is exhausted.");
+        return patchJob(issue, (current) => ({ ...current, status: "needs-inspection", error: "Task active-time limit reached", updatedAt: new Date().toISOString() }));
+      }
       const job = existing
         ? await patchJob(issue, (current) => ({
           ...baseJob(issue),
+          ...(resume ? { jobId: current.jobId, codingSessionId: current.codingSessionId } : {}),
+          ...(config.coding ? { activeMs: usedMs, activeTimeUncertain: true } : {}),
           ...(workspace && baseCommit ? { workspacePath: workspace.path, workspaceBranch: workspace.branch, baseCommit } : {}),
           ...(current.decision ? { decision: current.decision } : {}),
           ...(current.issueUpdate ? { issueUpdate: current.issueUpdate } : {}),
         }))
           : { ...baseJob(issue), ...(workspace && baseCommit ? { workspacePath: workspace.path, workspaceBranch: workspace.branch, baseCommit } : {}) };
       startingJobId = job.jobId;
-      if (!existing) await writeJob(issue, job);
+      if (!existing) await writeJob(issue, config.coding ? { ...job, activeTimeUncertain: true } : job);
+      let turnStartedAt: number | undefined;
+      let activeMs = usedMs;
+      let turnSubmitted = false;
       try {
         let workflowArgs: string | undefined;
         let pipeline = "workflows/synthetic-issue.lobster";
@@ -454,22 +497,28 @@ export default definePluginEntry({
               repository: job.repository, number: job.number,
               workspacePath: job.workspacePath ?? "", branch: job.workspaceBranch ?? "",
               title: assignedIssue.title, body: assignedIssue.body,
+              ...(resume ? { humanInput: resume.input } : {}),
             }),
-            timeoutSeconds: "1200",
+            timeoutSeconds: String(remainingSeconds),
           });
           pipeline = "workflows/coding-issue.lobster";
         }
+        turnStartedAt = performance.now();
+        turnSubmitted = true;
         const response: unknown = await call("tools.invoke", {
           name: "lobster",
           args: {
             action: "run",
             pipeline,
             cwd: ".",
-            timeoutMs: 1200000,
+            timeoutMs: remainingSeconds * 1000,
             ...(workflowArgs ? { argsJson: workflowArgs } : {}),
           },
           sessionKey: "agent:main:main",
         });
+        activeMs += Math.ceil(performance.now() - turnStartedAt);
+        turnStartedAt = undefined;
+        if (!Number.isSafeInteger(activeMs) || activeMs < usedMs || activeMs >= TASK_ACTIVE_LIMIT_MS) throw new Error("Task active-time limit reached or unknown.");
         const output = isRecord(response) && isRecord(response.output) ? response.output : undefined;
         const workflow = output && isRecord(output.details) ? output.details : undefined;
         const workflowStatus = workflow?.status;
@@ -489,6 +538,7 @@ export default definePluginEntry({
         let codingResult: Record<string, unknown> | undefined;
         let codingDelivery: CodingDelivery | undefined;
         let inputRequest: string | undefined;
+        let codingSessionId: string | undefined;
         if (config.coding) {
           if (!isRecord(resultValue)) {
             throw new Error("Coding result was missing; operator inspection is required");
@@ -509,10 +559,12 @@ export default definePluginEntry({
             const stopped: unknown = await call("sessions.describe", { key: job.sessionKey });
             if (!isRecord(stopped) || !isRecord(stopped.session) || stopped.session.key !== job.sessionKey ||
                 stopped.session.lastRunId !== resultValue.runId || stopped.session.hasActiveRun !== false ||
+                typeof stopped.session.sessionId !== "string" || !stopped.session.sessionId ||
                 (Array.isArray(stopped.session.activeRunIds) && stopped.session.activeRunIds.length > 0)) {
               throw new Error("Coding run stopped state could not be confirmed.");
             }
             inputRequest = resultValue.requestInput.trim();
+            codingSessionId = stopped.session.sessionId;
           }
           if (workflowStatus === "ok" && inputRequest === undefined) {
             const validation = normalizeCodingValidation(resultValue.validation);
@@ -543,7 +595,9 @@ export default definePluginEntry({
               || codingDelivery?.status === "needs-inspection"
               ? "needs-inspection" : "active",
           workflowStatus,
+          ...(config.coding ? { activeMs, activeTimeUncertain: false } : {}),
           ...(inputRequest !== undefined ? { inputRequest } : {}),
+          ...(codingSessionId !== undefined ? { codingSessionId } : {}),
           ...(codingResult && typeof codingResult.runId === "string" ? { codingRunId: codingResult.runId } : {}),
           ...(codingResult && typeof codingResult.status === "string" ? { codingRunStatus: codingResult.status } : {}),
           ...(codingResult && typeof codingResult.text === "string" ? { codingSummary: codingResult.text } : {}),
@@ -553,9 +607,11 @@ export default definePluginEntry({
         }));
         return completed;
       } catch {
+        if (turnStartedAt !== undefined) activeMs += Math.ceil(performance.now() - turnStartedAt);
         const uncertain = await patchJob(issue, (current) => ({
           ...current,
           status: "needs-inspection",
+          ...(Number.isSafeInteger(activeMs) && activeMs >= usedMs && config.coding ? { activeMs, activeTimeUncertain: turnSubmitted } : {}),
           error: "Workflow outcome requires inspection",
           updatedAt: new Date().toISOString(),
         }));
@@ -817,6 +873,29 @@ export default definePluginEntry({
           code: "ISSUE_DISPATCH_FAILED",
           message: error instanceof Error ? error.message : "issue dispatch failed",
         });
+      }
+    }, { scope: "operator.admin" });
+
+    // Claim before queueing: later replies must receive busy, never become steering.
+    const pendingResumes = new Set<string>();
+    api.registerGatewayMethod("agent-crew.resume", async ({ params, respond }) => {
+      let claimed: string | undefined;
+      try {
+        if (!isRecord(params) || typeof params.expectedRunId !== "string" || !params.expectedRunId || params.expectedRunId.length > 200 ||
+            typeof params.input !== "string" || !params.input.trim() || params.input.length > 16_000) {
+          throw new Error("Resume requires the waiting run ID and bounded human input.");
+        }
+        const issue = parseIssue(params.repository, params.issueNumber);
+        const key = issueSessionKey(issue);
+        if (pendingResumes.has(key)) throw new Error("Task is busy; wait for another input request.");
+        pendingResumes.add(key);
+        claimed = key;
+        const job = await dispatchIssue(issue, false, { expectedRunId: params.expectedRunId, input: params.input });
+        respond(true, { status: job.status, job: publicJob(job) });
+      } catch (error) {
+        respond(false, undefined, { code: "TASK_RESUME_BLOCKED", message: error instanceof Error ? error.message : "Task resume requires inspection." });
+      } finally {
+        if (claimed !== undefined) pendingResumes.delete(claimed);
       }
     }, { scope: "operator.admin" });
 

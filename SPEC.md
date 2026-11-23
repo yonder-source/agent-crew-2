@@ -144,8 +144,21 @@ is not a coding delivery and is never committed as a completed artifact. Persist
 the question with the existing job/session/worktree/base binding, expose it in
 status, reject assigned-issue operations while waiting, and block duplicate
 admission and configuration Apply. Unknown or mismatched stopped-state evidence
-requires inspection. This establishes the waiting boundary; Slack thread
-binding, authorized resumption and cumulative metering still need integration.
+requires inspection. Operator-admin `agent-crew.resume` accepts bounded input
+and the expected waiting run ID. It rechecks the retained physical session,
+repository/agent/worktree binding and stopped state, keeps the job ID, and starts
+a separate turn. Concurrent replies receive busy; stale replies cannot answer
+a later question. Resume does not reopen automatic issue admission after restart.
+
+For tracked tasks, persist cumulative `activeMs` measured with a monotonic clock
+around each coding workflow call. This conservatively includes CLI/orchestration
+overhead, excludes human waiting between calls, and supplies only whole remaining
+seconds from the shared 20-minute limit to subsequent turns. Reaching the limit
+blocks delivery and requires inspection. Persist an uncertainty marker before
+execution so interrupted or unacknowledged calls cannot resume or retry with
+unknown elapsed time. Legacy waiting records without elapsed time or physical
+session identity cannot resume by assuming zero. Slack thread binding and
+provider token accounting still need integration.
 Each coding task uses a bound thread. Status updates and requests for human input
 are distinct operations: only a confirmed transition to waiting stops the task's
 active-time clock. Accept the first authorized reply in the bound thread and
