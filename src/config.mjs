@@ -57,10 +57,11 @@ export function parseConfig(value) {
     }
     const agentId = coding.agentId ?? "coding";
     if (typeof agentId !== "string" || !/^[a-z][a-z0-9_-]*$/.test(agentId) ||
+        (coding.tokenBudget !== undefined && (typeof coding.tokenBudget !== "number" || !Number.isSafeInteger(coding.tokenBudget) || coding.tokenBudget < 1)) ||
         typeof coding.repositoryPath !== "string" || !coding.repositoryPath.startsWith("/")) {
       throw new Error("Agent Crew coding configuration is invalid.");
     }
-    return { ...result, coding: { agentId, repositoryPath: coding.repositoryPath } };
+    return { ...result, coding: { agentId, repositoryPath: coding.repositoryPath, ...(coding.tokenBudget === undefined ? {} : { tokenBudget: coding.tokenBudget }) } };
   }
   if (result.github) throw new Error("Agent Crew coding configuration is required when GitHub discovery is enabled.");
   return result;

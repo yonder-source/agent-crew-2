@@ -51,6 +51,11 @@ function mount(container, { host, signal }) {
     input.name = name;
     input.id = `agent-crew-${name}`;
     input.maxLength = 1024;
+    if (name === "tokenBudget") {
+      input.inputMode = "numeric";
+      input.placeholder = "Empty: no token limit";
+      input.title = "Cumulative reported tokens; checked between coding turns";
+    }
     if (name === "repository") {
       const option = document.createElement("option");
       option.value = "";

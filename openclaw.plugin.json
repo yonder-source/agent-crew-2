@@ -96,7 +96,8 @@
         "required": ["repositoryPath"],
         "properties": {
           "agentId": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$", "default": "coding" },
-          "repositoryPath": { "type": "string", "pattern": "^/" }
+          "repositoryPath": { "type": "string", "pattern": "^/" },
+          "tokenBudget": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }
         }
       }
     }

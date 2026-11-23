@@ -12,7 +12,7 @@ import { connectionConfig } from "../dist/setup-config.js";
 import { codingPrompt } from "../dist/coding-prompt.js";
 import { draftSlackSettings } from "../dist/slack-settings.js";
 import { slackCredentialStatus } from "../dist/slack-credentials.js";
-import { normalizeCodingValidation, isCodingDelivery, normalizeCodingUsage, isCodingUsage } from "../dist/coding-result.js";
+import { normalizeCodingValidation, isCodingDelivery, normalizeCodingUsage, isCodingUsage, addCodingUsage, parseTokenBudget } from "../dist/coding-result.js";
 
 const source = readFileSync("dist/index.js", "utf8")
   .replace(/^import .*;\n/gm, "")
@@ -23,7 +23,7 @@ const workspacePath = "/home/node/.openclaw/worktrees/fixture/issue-7";
 const branch = "openclaw/agent-crew-issue-7";
 const sessionKeyForFixture = "agent:coding:agent-crew-" + createHash("sha256").update("owner/repo#7").digest("hex").slice(0, 32);
 
-function harness(initialSession = null, appMode = false, slackDraft = {}, slackConfig) {
+function harness(initialSession = null, appMode = false, slackDraft = {}, slackConfig, tokenBudget) {
   let session = initialSession;
   let connectedAt = 100_000;
   const slackMessages = [];
@@ -67,7 +67,7 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
       if (slackMessages.length === failSlackAt) throw new Error("secret-provider-error");
       return `100.${String(slackMessages.length).padStart(6, "0")}`;
     }, performance: { now: () => clock },
-    TaskBaseError, createHash, randomUUID, codingPrompt, normalizeCodingValidation, isCodingDelivery, normalizeCodingUsage, isCodingUsage, slackCredentialStatus, draftSlackSettings,
+    TaskBaseError, createHash, randomUUID, codingPrompt, normalizeCodingValidation, isCodingDelivery, normalizeCodingUsage, isCodingUsage, addCodingUsage, parseTokenBudget, slackCredentialStatus, draftSlackSettings,
     validateSlackSettings: async (settings) => Object.keys(settings).map(role => ({ id: `${role}-slack`, status: "passed", message: "Fixture verified" })),
     readFile: async () => "fixture-token",
     prepareTaskBase: async () => "a".repeat(40),
@@ -98,7 +98,7 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
     parseConfig: () => ({
       ...(slackConfig ? { slack: slackConfig } : {}),
       environment: "test", github: { repository: "owner/repo", pollIntervalMs: 60_000, ...(appMode ? { appId: "123", installationId: 17 } : {}) },
-      coding: { agentId: "coding", repositoryPath },
+      coding: { agentId: "coding", repositoryPath, ...(tokenBudget !== undefined ? { tokenBudget } : {}) },
     }),
     definePluginEntry: (entry) => entry,
     callGatewayFromCli: async (method, _options, params) => {
@@ -620,3 +620,58 @@ const usageRestart = harness(usageProbe.session());
 assert.deepEqual(JSON.parse(JSON.stringify((await usageRestart.status()).details.job.codingUsage)),
   {status: "reported", total: 42, input: 30, output: 12});
 assert.deepEqual(JSON.parse(JSON.stringify(first.value.job.codingUsage)), {status: "unknown"});
+
+const limited = harness(null, false, {}, undefined, 100);
+limited.setUsage({status: "reported", total: 40});
+limited.requestInput("Confirm continuation");
+const limitedWait = (await limited.method("agent-crew.dispatch", issue)).value.job;
+assert.equal(limitedWait.status, "waiting");
+assert.equal(limitedWait.taskTokenUsage.total, 40);
+assert.equal(limitedWait.tokenBudget, 100);
+const limitedSnapshot = structuredClone(limited.session());
+const limitRestart = harness(structuredClone(limitedSnapshot), false, {}, undefined, 100);
+limitRestart.setInventory({sessions: [{key: limitedWait.sessionKey, hasActiveRun: false}]});
+limitRestart.setUsage({status: "reported", total: 60});
+const atLimit = (await limitRestart.method("agent-crew.resume", {...issue, expectedRunId: "run-7", input: "Proceed"})).value.job;
+assert.equal(atLimit.status, "needs-inspection");
+assert.equal(atLimit.taskTokenUsage.total, 100);
+assert.equal(atLimit.codingDelivery, undefined);
+assert.equal(limitRestart.calls.some(call => call.method === "verify-delivery"), false);
+await limitRestart.method("agent-crew.dispatch", issue);
+assert.equal(limitRestart.calls.filter(call => call.method === "tools.invoke").length, 1);
+for (const usage of [undefined, {status: "unknown"}, {status: "reported", total: 101}]) {
+  const blocked = harness(null, false, {}, undefined, 100);
+  blocked.setUsage(usage);
+  const result = (await blocked.method("agent-crew.dispatch", issue)).value.job;
+  assert.equal(result.status, "needs-inspection");
+  assert.equal(result.codingDelivery, undefined);
+  assert.equal(blocked.calls.some(call => call.method === "verify-delivery"), false);
+}
+const changedLimit = harness(structuredClone(limitedSnapshot), false, {}, undefined, 200);
+changedLimit.setInventory({sessions: [{key: limitedWait.sessionKey, hasActiveRun: false}]});
+const changedLimitResult = await changedLimit.method("agent-crew.resume", {...issue, expectedRunId: "run-7", input: "Proceed"});
+assert.equal(changedLimitResult.value.job.status, "needs-inspection");
+assert.equal(changedLimit.calls.some(call => call.method === "tools.invoke"), false);
+
+const belowLimit = harness(structuredClone(limitedSnapshot), false, {}, undefined, 100);
+belowLimit.setInventory({sessions: [{key: limitedWait.sessionKey, hasActiveRun: false}]});
+belowLimit.setUsage({status: "reported", total: 59});
+const below = (await belowLimit.method("agent-crew.resume", {...issue, expectedRunId: "run-7", input: "Proceed"})).value.job;
+assert.equal(below.status, "completed");
+assert.equal(below.taskTokenUsage.total, 99);
+const legacyTokens = structuredClone(limitedSnapshot);
+delete legacyTokens.pluginExtensions[0].value.taskTokenUsage;
+const legacyLimited = harness(legacyTokens, false, {}, undefined, 100);
+legacyLimited.setInventory({sessions: [{key: limitedWait.sessionKey, hasActiveRun: false}]});
+assert.equal((await legacyLimited.method("agent-crew.resume", {...issue, expectedRunId: "run-7", input: "Proceed"})).value.job.status, "needs-inspection");
+assert.equal(legacyLimited.calls.some(call => call.method === "tools.invoke"), false);
+const budgetApply = harness(null, true, {tokenBudget: "12345"});
+const budgetValidation = await budgetApply.method("agent-crew.setup.validate", {});
+assert.equal(budgetValidation.value.valid, true);
+assert.equal((await budgetApply.method("agent-crew.setup.apply", {draftHash: budgetValidation.value.draftHash})).ok, true);
+assert.equal(JSON.parse(budgetApply.calls.find(call => call.method === "config.set").params.raw)
+  .plugins.entries["agent-crew"].config.coding.tokenBudget, 12345);
+const invalidBudget = harness(null, true, {tokenBudget: "-1"});
+assert.equal((await invalidBudget.method("agent-crew.setup.validate", {})).value.valid, false);
+assert.equal((await invalidBudget.method("agent-crew.setup.apply", {})).ok, false);
+assert.equal(invalidBudget.calls.some(call => call.method === "config.set"), false);

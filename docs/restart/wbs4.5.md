@@ -303,5 +303,9 @@ Session context totals cannot serve as cumulative task usage. Retry/compaction
 coverage and live stop behavior remain prerequisites for token enforcement.
 
 The latest-turn runtime usage adapter and Controller status field are implemented
-and fixture-qualified. This does not yet implement cumulative token enforcement;
+and fixture-qualified. It supplies the cumulative guard described below;
 see the token accounting evidence for the remaining coverage and deployment limits.
+
+Cumulative reported totals, setup-configured token limits and turn-boundary
+inspection guards are now fixture-qualified. In-flight stopping and provider
+retry/compaction completeness remain outstanding; this is not a billing cap.

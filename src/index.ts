@@ -11,7 +11,7 @@ import { GitHubIssueError, OctokitGitHubIssueProvider } from "./github-issues.js
 import { GitHubAppClient, GitHubAppError } from "./github-app.js";
 import { cloneRepository, prepareTaskBase, verifyTaskWorkspace, commitTaskDelivery, TaskBaseError } from "./repository-clone.js";
 import { codingPrompt } from "./coding-prompt.js";
-import { normalizeCodingValidation, isCodingDelivery, normalizeCodingUsage, isCodingUsage, type CodingUsage, type CodingDelivery } from "./coding-result.js";
+import { normalizeCodingValidation, isCodingDelivery, normalizeCodingUsage, isCodingUsage, addCodingUsage, parseTokenBudget, type CodingUsage, type CodingDelivery } from "./coding-result.js";
 import { validateCheckout, type ConnectionCheck } from "./repository-validation.js";
 import { connectionConfig } from "./setup-config.js";
 import { draftSlackSettings, validateSlackSettings } from "./slack-settings.js";
@@ -78,6 +78,8 @@ type Job = Issue & {
   codingRunStatus?: string;
   codingSummary?: string;
   codingUsage?: CodingUsage;
+  taskTokenUsage?: CodingUsage;
+  tokenBudget?: number;
   inputRequest?: string;
   slackThread?: SlackTaskThread;
   activeMs?: number;
@@ -114,6 +116,8 @@ function isJob(value: unknown): value is Job {
       (value.codingRunId !== undefined && typeof value.codingRunId !== "string") ||
       (value.codingRunStatus !== undefined && typeof value.codingRunStatus !== "string") ||
       (value.codingUsage !== undefined && !isCodingUsage(value.codingUsage)) ||
+      (value.taskTokenUsage !== undefined && !isCodingUsage(value.taskTokenUsage)) ||
+      (value.tokenBudget !== undefined && (typeof value.tokenBudget !== "number" || !Number.isSafeInteger(value.tokenBudget) || value.tokenBudget < 1)) ||
       (value.codingSessionId !== undefined && (typeof value.codingSessionId !== "string" || !value.codingSessionId)) ||
       (value.activeTimeUncertain !== undefined && typeof value.activeTimeUncertain !== "boolean") ||
       (value.activeMs !== undefined && (typeof value.activeMs !== "number" || !Number.isSafeInteger(value.activeMs) || value.activeMs < 0)) ||
@@ -149,6 +153,8 @@ function publicJob(job: Job) {
     ...(job.codingRunId !== undefined ? { codingRunId: job.codingRunId } : {}),
     ...(job.codingRunStatus !== undefined ? { codingRunStatus: job.codingRunStatus } : {}),
     ...(job.codingUsage !== undefined ? { codingUsage: normalizeCodingUsage(job.codingUsage) } : {}),
+    ...(job.taskTokenUsage !== undefined ? { taskTokenUsage: normalizeCodingUsage(job.taskTokenUsage) } : {}),
+    ...(job.tokenBudget !== undefined ? { tokenBudget: job.tokenBudget } : {}),
     ...(job.activeTimeUncertain !== undefined ? { activeTimeUncertain: job.activeTimeUncertain } : {}),
     ...(job.activeMs !== undefined ? { activeMs: job.activeMs, activeTimeLimitMs: TASK_ACTIVE_LIMIT_MS } : {}),
     ...(job.slackThread !== undefined ? { slackThread: job.slackThread } : {}),
@@ -380,7 +386,8 @@ export default definePluginEntry({
       status: "starting",
       bootId,
       updatedAt: new Date().toISOString(),
-      ...(config.coding ? { activeMs: 0, connection: { agentId: config.coding.agentId, repositoryPath: config.coding.repositoryPath } } : {}),
+      ...(config.coding ? { activeMs: 0, taskTokenUsage: { status: "reported", total: 0 },
+        ...(config.coding.tokenBudget !== undefined ? { tokenBudget: config.coding.tokenBudget } : {}), connection: { agentId: config.coding.agentId, repositoryPath: config.coding.repositoryPath } } : {}),
     });
 
     const taskSlackThread = async (issue: Issue, job: Job): Promise<SlackTaskThread | undefined> => {
@@ -518,6 +525,12 @@ export default definePluginEntry({
           throw new Error("Coding session lacks a recorded workspace or base commit; operator inspection is required");
         }
       }
+      const priorUsage: CodingUsage = existing ? normalizeCodingUsage(existing.taskTokenUsage) : { status: "reported", total: 0 };
+      const tokenBudget = existing ? existing.tokenBudget : config.coding?.tokenBudget;
+      if (config.coding && existing && (tokenBudget !== config.coding.tokenBudget ||
+          (tokenBudget !== undefined && (priorUsage.status === "unknown" || priorUsage.total >= tokenBudget)))) {
+        return patchJob(issue, current => ({ ...current, status: "needs-inspection", error: "Task token budget reached, changed or usage unknown.", updatedAt: new Date().toISOString() }));
+      }
       const usedMs = existing?.activeMs ?? 0;
       const remainingSeconds = Math.floor((TASK_ACTIVE_LIMIT_MS - usedMs) / 1000);
       if (config.coding && remainingSeconds < 1) {
@@ -531,7 +544,8 @@ export default definePluginEntry({
           ? await patchJob(issue, (current) => ({
             ...baseJob(issue),
             ...(resume ? { jobId: current.jobId, codingSessionId: current.codingSessionId } : {}),
-            ...(config.coding ? { activeMs: usedMs, activeTimeUncertain: true } : {}),
+            ...(config.coding ? { activeMs: usedMs, activeTimeUncertain: true, taskTokenUsage: { status: "unknown" },
+              ...(tokenBudget !== undefined ? { tokenBudget } : {}) } : {}),
             ...(workspace && baseCommit ? { workspacePath: workspace.path, workspaceBranch: workspace.branch, baseCommit } : {}),
             ...(current.slackThread ? { slackThread: { ...current.slackThread,
               ...(resume?.slackReply ? { acceptedReplyTs: resume.slackReply.messageTs } : {}) } } : {}),
@@ -540,7 +554,7 @@ export default definePluginEntry({
           }))
           : { ...baseJob(issue), ...(workspace && baseCommit ? { workspacePath: workspace.path, workspaceBranch: workspace.branch, baseCommit } : {}) };
         startingJobId = job.jobId;
-        if (!existing) await writeJob(issue, config.coding ? { ...job, activeTimeUncertain: true } : job);
+        if (!existing) await writeJob(issue, config.coding ? { ...job, activeTimeUncertain: true, taskTokenUsage: { status: "unknown" } } : job);
       } catch (error) {
         startingJobId = undefined;
         throw error;
@@ -607,6 +621,8 @@ export default definePluginEntry({
         const resultValue: unknown = Array.isArray(workflow.output)
           ? workflow.output[workflow.output.length - 1] as unknown
           : undefined;
+        let taskTokenUsage: CodingUsage = { status: "unknown" };
+        let tokenBlocked = false;
         let codingResult: Record<string, unknown> | undefined;
         let codingDelivery: CodingDelivery | undefined;
         let inputRequest: string | undefined;
@@ -623,7 +639,9 @@ export default definePluginEntry({
             throw new Error("Coding result was invalid; operator inspection is required");
           }
           codingResult = resultValue;
-          if (resultValue.requestInput !== undefined) {
+          taskTokenUsage = addCodingUsage(priorUsage, normalizeCodingUsage(resultValue.usage));
+          tokenBlocked = tokenBudget !== undefined && (taskTokenUsage.status === "unknown" || taskTokenUsage.total >= tokenBudget);
+          if (resultValue.requestInput !== undefined && !tokenBlocked) {
             if (typeof resultValue.requestInput !== "string" || !resultValue.requestInput.trim() ||
                 resultValue.requestInput.length > 4_000 || workflowStatus !== "ok" || codingResult.status !== "ok") {
               throw new Error("Coding input request is invalid or the turn did not finish successfully.");
@@ -638,7 +656,7 @@ export default definePluginEntry({
             inputRequest = resultValue.requestInput.trim();
             codingSessionId = stopped.session.sessionId;
           }
-          if (workflowStatus === "ok" && inputRequest === undefined) {
+          if (workflowStatus === "ok" && inputRequest === undefined && !tokenBlocked) {
             const validation = normalizeCodingValidation(resultValue.validation);
             codingDelivery = {
               status: "needs-inspection", validation,
@@ -669,7 +687,7 @@ export default definePluginEntry({
           delete next.error;
           return {
             ...next,
-            status: inputRequest !== undefined ? "waiting" : workflowStatus === "ok" && (!config.coding || codingDelivery?.status === "ready")
+            status: tokenBlocked ? "needs-inspection" : inputRequest !== undefined ? "waiting" : workflowStatus === "ok" && (!config.coding || codingDelivery?.status === "ready")
               ? "completed" : workflowStatus === "cancelled" || (config.coding && codingResult?.status !== "ok")
                 || codingDelivery?.status === "needs-inspection"
                 ? "needs-inspection" : "active",
@@ -679,7 +697,8 @@ export default definePluginEntry({
             ...(codingSessionId !== undefined ? { codingSessionId } : {}),
             ...(codingResult && typeof codingResult.runId === "string" ? { codingRunId: codingResult.runId } : {}),
             ...(codingResult && typeof codingResult.status === "string" ? { codingRunStatus: codingResult.status } : {}),
-            ...(config.coding ? { codingUsage: normalizeCodingUsage(codingResult?.usage) } : {}),
+            ...(config.coding ? { codingUsage: normalizeCodingUsage(codingResult?.usage), taskTokenUsage } : {}),
+            ...(tokenBlocked ? { error: "Task token budget reached or usage unknown." } : {}),
             ...(codingResult && typeof codingResult.text === "string" ? { codingSummary: codingResult.text } : {}),
             ...(codingDelivery ? { codingDelivery } : {}),
             ...(typeof continuation?.resumeToken === "string" ? { workflowRef: continuation.resumeToken } : {}),
@@ -740,6 +759,7 @@ export default definePluginEntry({
             repository: config.github?.repository ?? "",
             repositoryPath: config.coding?.repositoryPath ?? "",
             codingAgentId: config.coding?.agentId ?? "",
+            tokenBudget: config.coding?.tokenBudget?.toString() ?? "",
             codingChannelId: config.slack?.coding?.channelId ?? "",
             codingUserIds: config.slack?.coding?.userIds.join(", ") ?? "",
             designerAgentId: config.slack?.designer?.agentId ?? "",
@@ -772,6 +792,12 @@ export default definePluginEntry({
     };
     const validateSetupDraft = async (draft: SetupDraft) => {
         const checks: ConnectionCheck[] = [];
+        try {
+          parseTokenBudget(draft.tokenBudget);
+          checks.push({ id: "token-budget", status: "passed", message: draft.tokenBudget ? "Token budget is valid; checked between coding turns." : "No token limit configured." });
+        } catch {
+          checks.push({ id: "token-budget", status: "failed", message: "Token budget must be a positive safe integer or empty." });
+        }
         try {
           const access = await githubApp.repositoryAccess(draft.githubAppId, Number(draft.installationId), draft.repository);
           checks.push({ id: "repository", status: "passed", message: "GitHub App credentials and repository read access verified." });
@@ -863,13 +889,14 @@ export default definePluginEntry({
           const snapshot: unknown = await call("config.get", {});
           const replacement = connectionConfig(snapshot, {
             repository: draft.repository, appId: draft.githubAppId, installationId: Number(draft.installationId),
-            agentId: draft.codingAgentId, repositoryPath: draft.repositoryPath, slack: draftSlackSettings(draft),
+            agentId: draft.codingAgentId, repositoryPath: draft.repositoryPath, tokenBudget: parseTokenBudget(draft.tokenBudget), slack: draftSlackSettings(draft),
           });
           const token = await githubApp.installationTokenForRepository(draft.githubAppId, Number(draft.installationId), draft.repository);
           await cloneRepository({ repository: draft.repository, repositoryPath: draft.repositoryPath, token });
           if (JSON.stringify(await readSetupDraft()) !== JSON.stringify(draft)) throw new Error("Draft changed during Apply; validate and apply again.");
           unchanged = config.github?.appId === draft.githubAppId && config.github.installationId === Number(draft.installationId) &&
             config.github.repository === draft.repository && config.coding?.agentId === draft.codingAgentId && config.coding.repositoryPath === draft.repositoryPath &&
+            config.coding?.tokenBudget === parseTokenBudget(draft.tokenBudget) &&
             JSON.stringify(config.slack ?? {}) === JSON.stringify(draftSlackSettings(draft));
           if (unchanged) return;
           committing = true;

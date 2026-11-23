@@ -71,3 +71,10 @@ try {
   rmSync(directory, { recursive: true, force: true });
 }
 console.log("Configuration validation checks passed.");
+
+for (const tokenBudget of [0, -1, 1.2, "100", Number.MAX_SAFE_INTEGER + 1]) {
+  assert.throws(() => parseConfig({environment: "test", github: {repository: "owner/repo"},
+    coding: {repositoryPath: "/repo", tokenBudget}}), /coding configuration is invalid/);
+}
+assert.equal(parseConfig({environment: "test", github: {repository: "owner/repo"},
+  coding: {repositoryPath: "/repo", tokenBudget: 100}}).coding.tokenBudget, 100);

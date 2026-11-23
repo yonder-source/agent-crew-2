@@ -50,8 +50,8 @@ request has a token report. Missing token data must retain unknown/inspection.
 Bind accounting to the trusted job and physical session, persist completed-turn
 checkpoints, and prevent duplicate aggregation after resume/restart. Qualify the
 stop path separately with a disposable run before claiming an active budget cap.
-The existing 20-minute active-time policy remains implemented; configurable token
-limits and their operator display remain unimplemented.
+The existing 20-minute active-time policy remains implemented. Subsequent
+implementation sections below record progress on token configuration and status.
 
 ## Latest-turn usage implementation
 
@@ -65,7 +65,7 @@ envelope stays distinguishable from missing data, which remains unknown.
 
 Controller finalization retains codingUsage with its codingRunId and exposes the
 latest turn through admin status. Starting a new turn clears the previous turn's
-fields; this is intentionally not yet a cumulative task total. Existing jobs
+fields; codingUsage itself is intentionally not a cumulative task total. Existing jobs
 without usage remain readable and are not backfilled with invented zero counts.
 
 Parser fixtures cover unavailable/missing/malformed/overflow counts, explicit
@@ -75,3 +75,27 @@ through the actual workflow/result step. These are fixture qualifications, not a
 new provider run. Source build/lint and coding/dispatcher/workflow fixtures pass.
 This implementation has not been deployed or live-qualified; the existing
 Gateway continues to run the prior Slack-qualified version.
+
+## Cumulative turn-boundary guard
+
+The next implementation adds taskTokenUsage and an optional positive integer
+coding.tokenBudget, including setup Validate/Apply and native manifest/parser
+validation. Empty setup input removes the configured limit. The limit is
+snapshotted per task and displayed with cumulative usage through status.
+
+Each finished workflow contributes its native turn total once to the captured
+pre-turn cumulative checkpoint. Before starting, persist unknown usage; failure
+or restart cannot turn that uncertainty into zero. Missing legacy checkpoints,
+unknown turn usage and integer overflow remain unknown. With a limit configured,
+unknown usage, a changed limit, or total >= limit blocks another turn. A newly
+finished turn reaching the limit is retained for inspection without committing
+a delivery or entering human-input waiting. Completed jobs retain duplicate
+admission protection; no aggregation occurs on status reads or repeat dispatch.
+
+Fixtures cover 40+59 below a 100-token limit, 40+60 reaching it after a simulated
+restart, a single-turn overshoot, unknown/missing legacy usage, changed limits,
+repeat dispatch, valid setup Apply and invalid limit rejection. Native config
+validation covers the updated schema and parser. No new model run, live abort
+or Gateway deployment is claimed. These checks operate at turn boundaries and
+allow in-flight overshoot; provider retry/compaction completeness and active
+request cancellation still require qualification before WBS4.5 acceptance.

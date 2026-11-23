@@ -178,7 +178,16 @@ Slack connection must be resent. This ingress path passed a real authorized-huma
 resumption qualification, including validated committed delivery and replay
 protection. Native admission is enabled only for the configured coding channel
 and authorized user allowlist. Provider
-Cumulative token accounting and enforcement still need integration. The
+The Controller accumulates reported per-turn totals in taskTokenUsage and
+checks an optional coding.tokenBudget between turns. The setup draft accepts
+a positive integer or an empty value to leave the limit unconfigured. Snapshot
+the limit per task, expose it with usage in status, and reject changed limits
+on resume/retry. With a limit configured, unknown or exhausted usage requires
+inspection before another turn or a committed delivery. Persist unknown before
+execution so interrupted accounting cannot restart from zero. Legacy records
+without cumulative usage remain unknown. This turn-boundary guard does not
+interrupt an in-flight model request; live stop behavior and complete retry/
+compaction coverage remain outstanding. The
 Controller now retains the latest turn's native CLI usage as codingUsage with
 reported/unknown status and exposes only token counts. Agent-authored reports
 cannot supply usage; missing, malformed or unavailable data remains unknown.

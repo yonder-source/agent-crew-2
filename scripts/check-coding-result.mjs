@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { parseCodingResult, normalizeCodingValidation, isCodingDelivery } from "../dist/coding-result.js";
+import { parseCodingResult, normalizeCodingValidation, isCodingDelivery, addCodingUsage, parseTokenBudget } from "../dist/coding-result.js";
 
 const runId = "run-fixture";
 const workspacePath = "/workspaces/issue-7";
@@ -62,3 +62,10 @@ assert.deepEqual(usageResult({...nativeUsage, secret: "discard"}).usage, {status
 
 assert.deepEqual(usageResult({...nativeUsage, usageReport: {state: "available"}}).usage,
   {status: "reported", ...nativeUsage});
+
+assert.deepEqual(addCodingUsage({status: "reported", total: 10}, {status: "reported", total: 20}), {status: "reported", total: 30});
+assert.deepEqual(addCodingUsage({status: "unknown"}, {status: "reported", total: 20}), {status: "unknown"});
+assert.deepEqual(addCodingUsage({status: "reported", total: Number.MAX_SAFE_INTEGER}, {status: "reported", total: 1}), {status: "unknown"});
+assert.equal(parseTokenBudget(""), undefined);
+assert.equal(parseTokenBudget("100"), 100);
+for (const limit of ["0", "-1", "1.5", "01", "1e3", " 100", "NaN", "9007199254740992"]) assert.throws(() => parseTokenBudget(limit));

@@ -47,6 +47,19 @@ export function isCodingUsage(value: unknown): value is CodingUsage {
   return value.status === "reported" && normalizeCodingUsage(value).status === "reported";
 }
 
+export function addCodingUsage(previous: CodingUsage, turn: CodingUsage): CodingUsage {
+  if (previous.status !== "reported" || turn.status !== "reported") return { status: "unknown" };
+  const total = previous.total + turn.total;
+  return Number.isSafeInteger(total) ? { status: "reported", total } : { status: "unknown" };
+}
+
+export function parseTokenBudget(value: string): number | undefined {
+  if (value === "") return undefined;
+  const limit = Number(value);
+  if (!/^[1-9][0-9]*$/.test(value) || !Number.isSafeInteger(limit)) throw new Error("Token budget must be a positive safe integer or empty.");
+  return limit;
+}
+
 type ValidationStatus = "ok" | "failed" | "unknown";
 type ValidationCheck = { command: string; outcome: ValidationStatus; exitCode?: number; summary?: string };
 export type CodingValidation = { status: ValidationStatus; summary?: string; checks: ValidationCheck[] };
