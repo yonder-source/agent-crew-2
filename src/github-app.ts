@@ -199,6 +199,13 @@ export class GitHubAppClient {
     if (!isRecord(value) || typeof value.token !== "string" || !value.token || typeof value.expires_at !== "string") {
       throw new GitHubAppError("GITHUB_RESPONSE_INVALID", "GitHub returned an invalid installation token response.");
     }
+    const expiresAt = Date.parse(value.expires_at);
+    if (!Number.isFinite(expiresAt)) {
+      throw new GitHubAppError("GITHUB_RESPONSE_INVALID", "GitHub returned an invalid installation token expiry.");
+    }
+    if (expiresAt <= Date.now()) {
+      throw new GitHubAppError("GITHUB_TOKEN_EXPIRED", "GitHub returned an expired installation token; credential acquisition must succeed before proceeding.");
+    }
     return value.token;
   }
 

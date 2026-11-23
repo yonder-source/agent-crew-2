@@ -125,6 +125,12 @@ failures without exposing secrets. Exercise expiry, renewal and failure behavior
 and record live GitHub evidence separately from fixtures. Document the App
 setup prerequisite and the secret delivery and rotation responsibilities.
 
+**Implementation:** App-mode operations obtain fresh tokens on demand without
+retaining an installation-token cache. Reject invalid or expired expiry data;
+credential recovery never automatically replays an issue write. See
+[token lifecycle qualification](evidence/wbs4.5-token-lifecycle-qualification.md)
+for fixture/live evidence and the README for operator key rotation.
+
 ## Small batch delivery contracts
 
 - **Batch 2 supplement:** Define `openclaw/agent-crew-issue-<number>` from updated remote main,

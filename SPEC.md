@@ -88,12 +88,16 @@ also plans and delivers GitHub App installation token issuance and renewal for
 unattended operation. Keep App credentials with the Controller in the existing
 secret delivery mechanism. For the single-user implementation, issue operations
 obtain a fresh repository-scoped Issues-write token per operation rather than
-keeping a cached installation token through expiry. Legacy configurations may
-continue using the pre-provisioned installation-token secret. Keep credentials
-and tokens out of coding-agent context and UI responses.
-Qualify the issuance and renewal mechanism, expiry and failure handling,
-and repository-scoped permissions before selecting its implementation. Reuse
-supported OpenClaw UI/configuration facilities; qualify the pinned runtime's
+keeping a cached installation token through expiry. Clone/fetch operations use
+fresh repository-scoped Contents-read tokens. Legacy configurations may continue
+using the pre-provisioned installation-token secret. Keep credentials and tokens
+out of coding-agent context and UI responses. Reject missing,
+unparseable or already-expired expiry data before using a returned token. A
+subsequent operation acquires credentials again; issuance recovery must not
+replay a failed or uncertain GitHub write. The App owner owns App installation,
+permission grants and key revocation; the deployment operator owns PEM delivery,
+rotation and connection revalidation. Reuse supported OpenClaw UI/configuration
+facilities; qualify the pinned runtime's
 extension support before choosing the integration. WBS4.5 validates the UI,
 connection persistence, access checks and coding sandbox Git operations; WBS5
 validates coding through draft PR publication, and WBS6 validates the full MVP

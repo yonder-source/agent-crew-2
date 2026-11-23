@@ -8,6 +8,7 @@ import { GitHubAppClient } from "../dist/github-app.js";
 import { cloneRepository, prepareTaskBase, verifyTaskWorkspace, verifyTaskDelivery, commitTaskDelivery } from "../dist/repository-clone.js";
 import { validateCheckout } from "../dist/repository-validation.js";
 import { parseConfig } from "../dist/config.mjs";
+import { GitHubIssueError, OctokitGitHubIssueProvider } from "../dist/github-issues.js";
 
 const privateKey = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs8", format: "pem" });
 const requests = [];
@@ -64,6 +65,72 @@ const rejected = new GitHubAppClient({ readPrivateKey: async () => privateKey, f
 await assert.rejects(rejected.listAccessibleRepositories("123"), /request failed/);
 const unavailable = new GitHubAppClient({ readPrivateKey: async () => { throw new Error("missing"); } });
 await assert.rejects(unavailable.listAccessibleRepositories("123"), /private key is unavailable/);
+
+// Exercise issuance failure and explicit recovery through an actual issue operation.
+let credentialMode = "valid";
+let keyAvailable = true;
+let issueTokenCount = 0;
+let writeCount = 0;
+let writeMode = "valid";
+const authenticatedTokens = [];
+const lifecycleClient = new GitHubAppClient({
+  readPrivateKey: async () => {
+    if (!keyAvailable) throw new Error("SECRET missing key path");
+    return privateKey;
+  },
+  fetcher: async (url, options) => {
+    const path = new URL(url).pathname;
+    if (path === "/app/installations") return Response.json([{ id: 17, account: { login: "owner" } }]);
+    if (path === "/installation/repositories") return Response.json({ repositories: [{ id: 23, full_name: "owner/repo", default_branch: "main" }] });
+    assert.ok(path.endsWith("/access_tokens"));
+    const body = JSON.parse(options.body);
+    if (body.permissions.issues !== "write") return Response.json({ token: "enumeration-token", expires_at: "2099-01-01T00:00:00Z" });
+    issueTokenCount += 1;
+    if (credentialMode === "network") throw new Error("SECRET token transport detail");
+    if (["401", "403", "500"].includes(credentialMode)) return new Response("SECRET token response", { status: Number(credentialMode) });
+    return Response.json({ token: `SECRET-issued-token-${issueTokenCount}`, expires_at:
+      credentialMode === "expired" ? "2000-01-01T00:00:00Z"
+        : credentialMode === "invalid-expiry" ? "SECRET invalid expiry" : "2099-01-01T00:00:00Z" });
+  },
+});
+const lifecycleProvider = new OctokitGitHubIssueProvider({
+  getInstallationToken: () => lifecycleClient.issueTokenForRepository("123", 17, "owner/repo"),
+  fetcher: async (_input, options) => {
+    assert.equal(options.method, "PATCH");
+    writeCount += 1;
+    authenticatedTokens.push(new Headers(options.headers).get("authorization"));
+    if (writeMode === "network") throw new Error("SECRET uncertain write");
+    if (writeMode === "401") return Response.json({ message: "SECRET denied write" }, { status: 401 });
+    return Response.json({ number: 7, title: "Fixture", body: "Changed", state: "open", labels: [] });
+  },
+});
+for (const mode of ["expired", "invalid-expiry", "401", "403", "500", "network"]) {
+  credentialMode = mode;
+  const before = issueTokenCount;
+  await assert.rejects(lifecycleProvider.updateIssueBody("owner/repo", 7, "Changed"), error =>
+    error instanceof GitHubIssueError && error.code === "GITHUB_CREDENTIAL_UNAVAILABLE" && !error.message.includes("SECRET"));
+  assert.equal(issueTokenCount, before + 1, "Credential failure must not automatically retry issuance or the issue write");
+  assert.equal(writeCount, 0, "Invalid credentials must fail before an issue write is dispatched");
+}
+credentialMode = "valid";
+keyAvailable = false;
+await assert.rejects(lifecycleProvider.updateIssueBody("owner/repo", 7, "Changed"), { code: "GITHUB_CREDENTIAL_UNAVAILABLE" });
+assert.equal(writeCount, 0);
+keyAvailable = true;
+await lifecycleProvider.updateIssueBody("owner/repo", 7, "Changed");
+await lifecycleProvider.updateIssueBody("owner/repo", 7, "Changed");
+assert.equal(writeCount, 2);
+assert.notEqual(authenticatedTokens[0], authenticatedTokens[1], "Later operations must acquire fresh tokens after recovery");
+for (const [mode, code] of [["401", "GITHUB_REQUEST_REJECTED"], ["network", "GITHUB_WRITE_UNCERTAIN"]]) {
+  writeMode = mode;
+  const beforeTokens = issueTokenCount;
+  const beforeWrites = writeCount;
+  await assert.rejects(lifecycleProvider.updateIssueBody("owner/repo", 7, "Changed"), error =>
+    error instanceof GitHubIssueError && error.code === code && !error.message.includes("SECRET"));
+  assert.equal(issueTokenCount, beforeTokens + 1);
+  assert.equal(writeCount, beforeWrites + 1, "Credential recovery must not replay a failed or uncertain write");
+}
+console.log("App token lifecycle: expiry, failed issuance, fresh acquisition, key recovery and no write replay passed (fixtures).");
 
 const root = await mkdtemp(join(tmpdir(), "agent-crew-repository-check-"));
 const previousRoot = process.env.AGENT_CREW_REPOSITORY_ROOT;

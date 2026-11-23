@@ -105,23 +105,26 @@ and volume and needs local port 18789 available.
 
 ## WBS3 GitHub issue access
 
-Configure the plugin with `github.repository` and optional `github.pollIntervalMs`
-to enable polling. The Gateway reads the pre-provisioned GitHub App installation
-token from `/run/secrets/agent-crew-github-installation-token`; local Docker
-users can mount it with `infra/local-dev/openclaw/compose.github.yaml` using a
-file at `.local/secrets/github-app-installation-token`. The installation needs
-Issues read/write permission. WBS3 checks use deterministic fixtures unless a
-disposable GitHub repository and installation token are supplied; fixture
-results are not live GitHub qualification.
+Configure `github.repository`, `github.appId`, `github.installationId` and
+optional `github.pollIntervalMs`, or use the repository setup page. In App mode,
+the Controller reads the private key from
+`/run/secrets/agent-crew-github-app-private-key` and obtains a fresh token for each
+operation: repository-scoped Contents read for clone/fetch and Issues write for
+issue operations. It does not cache installation tokens or require their manual
+replacement. Invalid or expired token responses are rejected before use. The
+installation needs Issues read/write permission. Fixtures are separate from
+live GitHub qualification.
 
-The repository setup page uses the same Compose overlay to mount the GitHub App
-private key from `.local/secrets/agent-crew.pem`. The Controller uses it only to
-discover installed repositories and issue a repository-scoped read token for
-cloning. The key and installation tokens never enter the UI.
+Configurations without an App ID retain the legacy pre-provisioned installation
+token at `/run/secrets/agent-crew-github-installation-token`. Local Docker users
+can mount `.local/secrets/github-app-installation-token` with
+`infra/local-dev/openclaw/compose.github.yaml`; that overlay also mounts the App
+private key. Legacy tokens require manual replacement on expiry. The key and
+tokens never enter the UI or coding sandbox.
 
-For repository setup before WBS3 token renewal is enabled, use
-`infra/local-dev/openclaw/compose.setup.yaml` instead of the GitHub overlay.
-It needs only `.local/secrets/agent-crew.pem`, and mounts the writable configuration
+For unattended App-mode setup, use
+`infra/local-dev/openclaw/compose.setup.yaml`. It needs only
+`.local/secrets/agent-crew.pem`, and mounts the writable configuration
 directory `.local/gateway-config` at `/etc/agent-crew`. Initialize
 `.local/gateway-config/openclaw.json` from the existing Gateway configuration
 to preserve agent and model settings (or from root `openclaw.json` on a fresh
@@ -138,14 +141,43 @@ and runtime activation are reported separately; the native reloader activates
 the connection after the Apply request finishes. Runtime activation resumes scheduling only after connection and task-state
 checks. Resume scheduling repeats those checks manually. An unacknowledged
 configuration write requires inspection before retrying or resuming.
-App-based issue operations obtain fresh, repository-scoped Issues-write tokens
-from the PEM; the legacy installation-token file is used only by configurations
-without an App ID. Tokens are never delivered to coding agents.
 Native UI assets are snapshotted at Gateway startup and served under an
 immutable revision URL. After updating UI files, restart the Gateway to publish
 the new revision; copying files into a running container is insufficient.
 
+### GitHub App credentials and rotation
+
+The App owner installs the App on the intended repository and grants the needed
+permissions; the deployment operator provisions the PEM at the fixed host path.
+GitHub installation tokens expire after one hour. Each new operation obtains a
+new token rather than extending an old one. Credential acquisition failures stop
+that operation; recovery never automatically replays an issue write with an
+uncertain outcome. See [GitHub's installation token documentation](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app).
+
+To rotate the PEM:
+
+1. The App owner generates an additional private key in GitHub, keeping the old
+   key active until the new one is validated.
+2. The operator confirms no coding run is active, resolves uncertain tasks and
+   stops the Gateway before replacing `.local/secrets/agent-crew.pem`. Preserve
+   permissions that allow the Gateway user to read it and keep it out of Git.
+3. Recreate the Gateway with the same Compose files (`up -d --force-recreate
+   gateway`). Recreating refreshes the single-file secret bind after an atomic
+   host-file replacement; a process restart alone is not sufficient for that case.
+4. Validate the saved connection using the UI, confirm discovery/read access and
+   scheduling status, then have the App owner revoke the old key in GitHub.
+
+Missing keys, rejected App authentication, unavailable installations or missing
+permissions require correcting the credential/setup before validation and
+resuming scheduling. Inspect and explicitly resolve any uncertain write before
+retrying it. The Controller reads the current PEM when creating each App JWT;
+it does not keep the private key or installation token in a retained store.
+See [GitHub's private-key rotation documentation](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/managing-private-keys-for-github-apps).
+
 ## Local coding workflow
+
+This example uses legacy token-file credentials; the setup overlay above provides
+App-mode issuance for unattended operation.
 
 The default Compose config stays credential-free for synthetic checks. To run
 the real coding workflow, copy
