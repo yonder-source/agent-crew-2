@@ -12,7 +12,7 @@ import { connectionConfig } from "../dist/setup-config.js";
 import { codingPrompt } from "../dist/coding-prompt.js";
 import { draftSlackSettings } from "../dist/slack-settings.js";
 import { slackCredentialStatus } from "../dist/slack-credentials.js";
-import { normalizeCodingValidation, isCodingDelivery } from "../dist/coding-result.js";
+import { normalizeCodingValidation, isCodingDelivery, normalizeCodingUsage, isCodingUsage } from "../dist/coding-result.js";
 
 const source = readFileSync("dist/index.js", "utf8")
   .replace(/^import .*;\n/gm, "")
@@ -37,6 +37,7 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
   let releaseRun;
   let runId = "run-7";
   let codingStatus = "ok";
+  let codingUsage;
   let admissionHold, releaseAdmission, notifyAdmission;
   const admissionWritten = new Promise(resolve => { notifyAdmission = resolve; });
   let retainedQuestion;
@@ -66,7 +67,7 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
       if (slackMessages.length === failSlackAt) throw new Error("secret-provider-error");
       return `100.${String(slackMessages.length).padStart(6, "0")}`;
     }, performance: { now: () => clock },
-    TaskBaseError, createHash, randomUUID, codingPrompt, normalizeCodingValidation, isCodingDelivery, slackCredentialStatus, draftSlackSettings,
+    TaskBaseError, createHash, randomUUID, codingPrompt, normalizeCodingValidation, isCodingDelivery, normalizeCodingUsage, isCodingUsage, slackCredentialStatus, draftSlackSettings,
     validateSlackSettings: async (settings) => Object.keys(settings).map(role => ({ id: `${role}-slack`, status: "passed", message: "Fixture verified" })),
     readFile: async () => "fixture-token",
     prepareTaskBase: async () => "a".repeat(40),
@@ -145,7 +146,7 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
         if (stoppedRunId === "run-7") stoppedRunId = runId;
         return { ok: true, output: { details: {
         ok: true, status: "ok", output: [{
-          runId, status: codingStatus, text: codingText,
+          runId, status: codingStatus, text: codingText, usage: codingUsage,
           workspacePath, workspaceBranch: branch, validation: codingValidation, headCommit: "untrusted-agent-head",
           ...(requestInput !== undefined ? { requestInput } : {}),
         }],
@@ -196,6 +197,7 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
     retainQuestionDuringRun(value) { retainedQuestion = value; },
     setCoding(status, text = codingText) { codingStatus = status; codingText = text; },
     setValidation(value) { codingValidation = value; },
+    setUsage(value) { codingUsage = value; },
     failDelivery() { deliveryFailure = true; },
     requestInput(value, active = false) { requestInput = value; hasActiveRun = active; },
     setStoppedRun(value) { stoppedRunId = value; },
@@ -609,3 +611,12 @@ const admissionStatus = (await admissionView.status()).details.job.status;
 admissionView.releaseAdmission();
 await admittingResume;
 assert.equal(admissionStatus, "starting", "A current-process resume awaiting metadata acknowledgement is not uncertain");
+
+const usageProbe = harness();
+usageProbe.setUsage({status: "reported", total: 42, input: 30, output: 12, secret: "discard"});
+const usageJob = (await usageProbe.method("agent-crew.dispatch", issue)).value.job;
+assert.deepEqual(JSON.parse(JSON.stringify(usageJob.codingUsage)), {status: "reported", total: 42, input: 30, output: 12});
+const usageRestart = harness(usageProbe.session());
+assert.deepEqual(JSON.parse(JSON.stringify((await usageRestart.status()).details.job.codingUsage)),
+  {status: "reported", total: 42, input: 30, output: 12});
+assert.deepEqual(JSON.parse(JSON.stringify(first.value.job.codingUsage)), {status: "unknown"});

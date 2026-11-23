@@ -178,7 +178,11 @@ Slack connection must be resent. This ingress path passed a real authorized-huma
 resumption qualification, including validated committed delivery and replay
 protection. Native admission is enabled only for the configured coding channel
 and authorized user allowlist. Provider
-token accounting still needs integration. A read-only qualification confirmed
+Cumulative token accounting and enforcement still need integration. The
+Controller now retains the latest turn's native CLI usage as codingUsage with
+reported/unknown status and exposes only token counts. Agent-authored reports
+cannot supply usage; missing, malformed or unavailable data remains unknown.
+This observational field is not a cumulative budget or completeness guarantee. A read-only qualification confirmed
 that session-row totalTokens measures context rather than cumulative task usage;
 sessions.usage exposes a distinct aggregate. Retry/compaction coverage, missing
 usage detection and live stop behavior remain unqualified; see

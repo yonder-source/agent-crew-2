@@ -28,10 +28,11 @@ try {
   };
   const executable = join(root, "openclaw");
   const validation = { status: "ok", checks: [{ command: "npm test", outcome: "ok", exitCode: 0 }] };
+  const usage = { total: 123, input: 100, output: 23 };
   const report = JSON.stringify({ summary: "fixture complete", validation });
   await writeFile(executable, `#!${process.execPath}\nconst fs=require('node:fs');
 fs.writeFileSync(${JSON.stringify(captured)},JSON.stringify(process.argv.slice(2)));
-console.log(JSON.stringify({runId:'fixture-run',status:'ok',result:{payloads:[{text:${JSON.stringify(report)}}]}}));\n`);
+console.log(JSON.stringify({runId:'fixture-run',status:'ok',result:{meta:{agentMeta:{usage:${JSON.stringify(usage)}}},payloads:[{text:${JSON.stringify(report)}}]}}));\n`);
   await chmod(executable, 0o700);
   const lobster = "/opt/agent-crew-lobster/node_modules/@openclaw/lobster/node_modules/@clawdbot/lobster/bin/lobster.js";
   const result = spawnSync(process.execPath, [lobster, "run", "--mode", "tool", "--file",
@@ -45,7 +46,7 @@ console.log(JSON.stringify({runId:'fixture-run',status:'ok',result:{payloads:[{t
   assert.equal(envelope.status, "ok");
   assert.deepEqual(envelope.output, [{ runId: "fixture-run", status: "ok", text: "fixture complete",
     workspacePath: args.workspacePath, workspaceBranch: args.workspaceBranch,
-    validation }]);
+    validation, usage: { status: "reported", ...usage } }]);
   assert.deepEqual(JSON.parse(await readFile(captured, "utf8")), [
     "agent", "--json", "--agent", args.agentId, "--session-key", args.sessionKey,
     "--message", args.prompt, "--timeout", args.timeoutSeconds,

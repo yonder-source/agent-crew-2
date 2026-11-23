@@ -11,7 +11,7 @@ const input = JSON.stringify({
 });
 assert.deepEqual(parseCodingResult(input, workspacePath, workspaceBranch), {
   runId, status: "ok", text: "README updated\nChecks passed", workspacePath, workspaceBranch,
-  validation: { status: "unknown", checks: [] },
+  validation: { status: "unknown", checks: [] }, usage: { status: "unknown" },
 });
 assert.throws(() => parseCodingResult(input, workspacePath, ""), /assigned workspace/);
 const validation = { status: "ok", checks: [{ command: "npm test", outcome: "ok", exitCode: 0 }] };
@@ -43,3 +43,22 @@ for (const question of ["", " ", null, true, "q".repeat(4_001)]) {
   assert.throws(() => parseCodingResult(awaitingInput(question), workspacePath, workspaceBranch), /input request/);
 }
 assert.equal(structured.requestInput, undefined, "Ordinary status must not cause waiting");
+
+const nativeUsage = { total: 30, input: 10, output: 5, cacheRead: 15 };
+const usageResult = (usage, reportUsage = { total: 999999 }) => parseCodingResult(JSON.stringify({runId, status: "ok", result: {
+  meta: {agentMeta: {usage}}, payloads: [{text: JSON.stringify({summary: "Done", usage: reportUsage})}],
+}}), workspacePath, workspaceBranch);
+assert.deepEqual(usageResult(nativeUsage).usage, {status: "reported", ...nativeUsage});
+assert.deepEqual(usageResult(undefined).usage, {status: "unknown"}, "Agent text cannot supply runtime usage");
+for (const usage of [null, {}, {total: -1}, {total: 1.5}, {total: Number.MAX_SAFE_INTEGER + 1},
+  {total: 1, input: 2}, {total: 1, input: -1}, {total: 1, output: null},
+  {total: 30, usageReport: {state: "unavailable"}}, {total: 1, usageReport: {}},
+  {total: 1, usageReport: {state: "estimated"}}]) {
+  assert.deepEqual(usageResult(usage).usage, {status: "unknown"});
+}
+assert.deepEqual(usageResult({total: 0, input: 0, output: 0}).usage,
+  {status: "reported", total: 0, input: 0, output: 0});
+assert.deepEqual(usageResult({...nativeUsage, secret: "discard"}).usage, {status: "reported", ...nativeUsage});
+
+assert.deepEqual(usageResult({...nativeUsage, usageReport: {state: "available"}}).usage,
+  {status: "reported", ...nativeUsage});

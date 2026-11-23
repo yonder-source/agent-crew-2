@@ -301,3 +301,7 @@ Token accounting source inspection and a live read-only query are recorded in
 [token accounting qualification](evidence/wbs4.5-coding-token-qualification.md).
 Session context totals cannot serve as cumulative task usage. Retry/compaction
 coverage and live stop behavior remain prerequisites for token enforcement.
+
+The latest-turn runtime usage adapter and Controller status field are implemented
+and fixture-qualified. This does not yet implement cumulative token enforcement;
+see the token accounting evidence for the remaining coverage and deployment limits.

@@ -6,6 +6,47 @@ function isArray(value: unknown): value is unknown[] {
   return Array.isArray(value);
 }
 
+// Reported by the native CLI, never by the agent-authored final text.
+// Reported usage is observational until retry/compaction completeness is qualified.
+export type CodingUsage = { status: "unknown" } | {
+  status: "reported";
+  total: number;
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+};
+
+const USAGE_COMPONENTS = ["input", "output", "cacheRead", "cacheWrite"] as const;
+function isTokenCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+export function normalizeCodingUsage(value: unknown): CodingUsage {
+  if (!isRecord(value) || !isTokenCount(value.total) ||
+      (value.usageReport !== undefined && (!isRecord(value.usageReport) || value.usageReport.state !== "available")) ||
+      USAGE_COMPONENTS.some(key => value[key] !== undefined && !isTokenCount(value[key]))) return { status: "unknown" };
+  let components = 0;
+  for (const key of USAGE_COMPONENTS) {
+    const count = value[key];
+    if (isTokenCount(count)) components += count;
+  }
+  if (!Number.isSafeInteger(components) || components > value.total) return { status: "unknown" };
+  return { status: "reported", total: value.total,
+    ...(isTokenCount(value.input) ? { input: value.input } : {}),
+    ...(isTokenCount(value.output) ? { output: value.output } : {}),
+    ...(isTokenCount(value.cacheRead) ? { cacheRead: value.cacheRead } : {}),
+    ...(isTokenCount(value.cacheWrite) ? { cacheWrite: value.cacheWrite } : {}),
+  };
+}
+
+export function isCodingUsage(value: unknown): value is CodingUsage {
+  if (!isRecord(value)) return false;
+  if (value.status === "unknown") return value.total === undefined &&
+    USAGE_COMPONENTS.every(key => value[key] === undefined);
+  return value.status === "reported" && normalizeCodingUsage(value).status === "reported";
+}
+
 type ValidationStatus = "ok" | "failed" | "unknown";
 type ValidationCheck = { command: string; outcome: ValidationStatus; exitCode?: number; summary?: string };
 export type CodingValidation = { status: ValidationStatus; summary?: string; checks: ValidationCheck[] };
@@ -69,6 +110,9 @@ export function parseCodingResult(input: string, workspacePath: string, workspac
   }
 
   const runResult = isRecord(result.result) ? result.result : undefined;
+  const meta = isRecord(runResult?.meta) ? runResult.meta : undefined;
+  const agentMeta = isRecord(meta?.agentMeta) ? meta.agentMeta : undefined;
+  const usage = normalizeCodingUsage(agentMeta?.usage);
   const payloads = isArray(runResult?.payloads) ? runResult.payloads : [];
   const text = payloads
     .filter((payload): payload is Record<string, unknown> & { text: string } =>
@@ -87,6 +131,6 @@ export function parseCodingResult(input: string, workspacePath: string, workspac
       requestInput.trim().length === 0 || requestInput.length > 4_000)) {
     throw new Error("Coding input request is invalid.");
   }
-  return { runId: result.runId, status: result.status, text: summary, workspacePath, workspaceBranch, validation,
+  return { runId: result.runId, status: result.status, text: summary, workspacePath, workspaceBranch, validation, usage,
     ...(typeof requestInput === "string" ? { requestInput: requestInput.trim() } : {}) };
 }

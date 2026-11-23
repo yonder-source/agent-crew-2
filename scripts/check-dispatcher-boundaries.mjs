@@ -9,7 +9,7 @@ import { assignedIssueFromSession, trustedSessionKey } from "../dist/assignment.
 import { createContext, runInContext } from "node:vm";
 import { IssueDiscovery } from "../dist/discovery.js";
 import { GitHubAppClient } from "../dist/github-app.js";
-import { isCodingDelivery } from "../dist/coding-result.js";
+import { isCodingDelivery, normalizeCodingUsage, isCodingUsage } from "../dist/coding-result.js";
 
 const source = readFileSync(process.env.DISPATCHER_SOURCE ?? "dist/index.js", "utf8")
   .replace(/^import .*;\n/gm, "")
@@ -27,7 +27,7 @@ const tools = new Map();
 const methods = new Map();
 let issueToolFactory;
 const context = createContext({ authorizesSlackTaskReply, isReplyAfterSlackConnection, parseSlackTaskReply, isSlackTaskThread, postTaskSlackMessage, performance,
-  TaskBaseError, createHash, randomUUID, isCodingDelivery, process: { env: { AGENT_CREW_GATEWAY_TOKEN: "test" } },
+  TaskBaseError, createHash, randomUUID, isCodingDelivery, normalizeCodingUsage, isCodingUsage, process: { env: { AGENT_CREW_GATEWAY_TOKEN: "test" } },
   assignedIssueFromSession, trustedSessionKey,
   GitHubAppClient,
   Type: new Proxy({}, { get: () => () => ({}) }),

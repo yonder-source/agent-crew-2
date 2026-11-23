@@ -11,7 +11,7 @@ import { GitHubIssueError, OctokitGitHubIssueProvider } from "./github-issues.js
 import { GitHubAppClient, GitHubAppError } from "./github-app.js";
 import { cloneRepository, prepareTaskBase, verifyTaskWorkspace, commitTaskDelivery, TaskBaseError } from "./repository-clone.js";
 import { codingPrompt } from "./coding-prompt.js";
-import { normalizeCodingValidation, isCodingDelivery, type CodingDelivery } from "./coding-result.js";
+import { normalizeCodingValidation, isCodingDelivery, normalizeCodingUsage, isCodingUsage, type CodingUsage, type CodingDelivery } from "./coding-result.js";
 import { validateCheckout, type ConnectionCheck } from "./repository-validation.js";
 import { connectionConfig } from "./setup-config.js";
 import { draftSlackSettings, validateSlackSettings } from "./slack-settings.js";
@@ -77,6 +77,7 @@ type Job = Issue & {
   codingRunId?: string;
   codingRunStatus?: string;
   codingSummary?: string;
+  codingUsage?: CodingUsage;
   inputRequest?: string;
   slackThread?: SlackTaskThread;
   activeMs?: number;
@@ -112,6 +113,7 @@ function isJob(value: unknown): value is Job {
       (value.workflowStatus !== undefined && !isWorkflowStatus(value.workflowStatus)) ||
       (value.codingRunId !== undefined && typeof value.codingRunId !== "string") ||
       (value.codingRunStatus !== undefined && typeof value.codingRunStatus !== "string") ||
+      (value.codingUsage !== undefined && !isCodingUsage(value.codingUsage)) ||
       (value.codingSessionId !== undefined && (typeof value.codingSessionId !== "string" || !value.codingSessionId)) ||
       (value.activeTimeUncertain !== undefined && typeof value.activeTimeUncertain !== "boolean") ||
       (value.activeMs !== undefined && (typeof value.activeMs !== "number" || !Number.isSafeInteger(value.activeMs) || value.activeMs < 0)) ||
@@ -146,6 +148,7 @@ function publicJob(job: Job) {
     ...(job.workflowStatus !== undefined ? { workflowStatus: job.workflowStatus } : {}),
     ...(job.codingRunId !== undefined ? { codingRunId: job.codingRunId } : {}),
     ...(job.codingRunStatus !== undefined ? { codingRunStatus: job.codingRunStatus } : {}),
+    ...(job.codingUsage !== undefined ? { codingUsage: normalizeCodingUsage(job.codingUsage) } : {}),
     ...(job.activeTimeUncertain !== undefined ? { activeTimeUncertain: job.activeTimeUncertain } : {}),
     ...(job.activeMs !== undefined ? { activeMs: job.activeMs, activeTimeLimitMs: TASK_ACTIVE_LIMIT_MS } : {}),
     ...(job.slackThread !== undefined ? { slackThread: job.slackThread } : {}),
@@ -660,6 +663,7 @@ export default definePluginEntry({
         const completed = await patchJob(issue, (current) => {
           const next = { ...current };
           delete next.inputRequest;
+          delete next.codingUsage;
           delete next.codingDelivery;
           delete next.workflowRef;
           delete next.error;
@@ -675,6 +679,7 @@ export default definePluginEntry({
             ...(codingSessionId !== undefined ? { codingSessionId } : {}),
             ...(codingResult && typeof codingResult.runId === "string" ? { codingRunId: codingResult.runId } : {}),
             ...(codingResult && typeof codingResult.status === "string" ? { codingRunStatus: codingResult.status } : {}),
+            ...(config.coding ? { codingUsage: normalizeCodingUsage(codingResult?.usage) } : {}),
             ...(codingResult && typeof codingResult.text === "string" ? { codingSummary: codingResult.text } : {}),
             ...(codingDelivery ? { codingDelivery } : {}),
             ...(typeof continuation?.resumeToken === "string" ? { workflowRef: continuation.resumeToken } : {}),

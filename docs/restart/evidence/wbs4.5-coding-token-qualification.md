@@ -52,3 +52,26 @@ checkpoints, and prevent duplicate aggregation after resume/restart. Qualify the
 stop path separately with a disposable run before claiming an active budget cap.
 The existing 20-minute active-time policy remains implemented; configurable token
 limits and their operator display remain unimplemented.
+
+## Latest-turn usage implementation
+
+The coding-result adapter now reads result.meta.agentMeta.usage from the native
+CLI envelope, never the agent-authored JSON payload. It normalizes nonnegative
+safe integer counts into reported/unknown, rejecting malformed totals/components,
+component sums exceeding total, unavailable usage and unsupported report states.
+Only total/input/output/cacheRead/cacheWrite survive the boundary; costs and
+arbitrary provider fields are discarded. A zero explicitly present in the runtime
+envelope stays distinguishable from missing data, which remains unknown.
+
+Controller finalization retains codingUsage with its codingRunId and exposes the
+latest turn through admin status. Starting a new turn clears the previous turn's
+fields; this is intentionally not yet a cumulative task total. Existing jobs
+without usage remain readable and are not backfilled with invented zero counts.
+
+Parser fixtures cover unavailable/missing/malformed/overflow counts, explicit
+zero, untrusted text and field redaction. Controller fixtures cover persistence
+and status after restart. The native Lobster fake-CLI fixture now passes usage
+through the actual workflow/result step. These are fixture qualifications, not a
+new provider run. Source build/lint and coding/dispatcher/workflow fixtures pass.
+This implementation has not been deployed or live-qualified; the existing
+Gateway continues to run the prior Slack-qualified version.
