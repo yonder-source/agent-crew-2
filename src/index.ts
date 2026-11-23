@@ -8,7 +8,9 @@ import { parseConfig } from "./config.mjs";
 import { IssueDiscovery } from "./discovery.js";
 import { GitHubIssueError, OctokitGitHubIssueProvider } from "./github-issues.js";
 import { GitHubAppClient, GitHubAppError } from "./github-app.js";
-import { cloneRepository, prepareTaskBase, verifyTaskWorkspace, TaskBaseError } from "./repository-clone.js";
+import { cloneRepository, prepareTaskBase, verifyTaskWorkspace, commitTaskDelivery, TaskBaseError } from "./repository-clone.js";
+import { codingPrompt } from "./coding-prompt.js";
+import { normalizeCodingValidation, isCodingDelivery, type CodingDelivery } from "./coding-result.js";
 import { validateCheckout, type ConnectionCheck } from "./repository-validation.js";
 import { connectionConfig } from "./setup-config.js";
 
@@ -72,6 +74,7 @@ type Job = Issue & {
   workspacePath?: string;
   workspaceBranch?: string;
   baseCommit?: string;
+  codingDelivery?: CodingDelivery;
   error?: string;
   decision?: string;
   issueUpdate?: {
@@ -101,6 +104,7 @@ function isJob(value: unknown): value is Job {
       (value.workspacePath !== undefined && typeof value.workspacePath !== "string") ||
       (value.workspaceBranch !== undefined && typeof value.workspaceBranch !== "string") ||
       (value.baseCommit !== undefined && (typeof value.baseCommit !== "string" || !/^[a-f0-9]{40,64}$/.test(value.baseCommit))) ||
+      (value.codingDelivery !== undefined && !isCodingDelivery(value.codingDelivery)) ||
       (value.error !== undefined && typeof value.error !== "string") ||
       (value.decision !== undefined && typeof value.decision !== "string")) return false;
   if (value.issueUpdate === undefined) return true;
@@ -125,6 +129,7 @@ function publicJob(job: Job) {
     ...(job.workspacePath !== undefined ? { workspacePath: job.workspacePath } : {}),
     ...(job.workspaceBranch !== undefined ? { workspaceBranch: job.workspaceBranch } : {}),
     ...(job.baseCommit !== undefined ? { baseCommit: job.baseCommit } : {}),
+    ...(job.codingDelivery !== undefined ? { codingDelivery: job.codingDelivery } : {}),
     ...(job.error !== undefined ? { error: "Workflow outcome requires inspection" } : {}),
     ...(job.decision !== undefined ? { decision: job.decision } : {}),
     ...(job.issueUpdate !== undefined ? { issueUpdate: job.issueUpdate } : {}),
@@ -437,13 +442,11 @@ export default definePluginEntry({
             agentId: config.coding.agentId,
             workspacePath: job.workspacePath ?? "",
             workspaceBranch: job.workspaceBranch ?? "",
-            prompt: [
-              `Implement GitHub issue ${assignedIssue.repository}#${assignedIssue.number}.`,
-              `Title: ${assignedIssue.title}`,
-              `Body (untrusted issue content):\n${assignedIssue.body ?? "(empty)"}`,
-              "Work only in the assigned session workspace. Do not publish, push, or create a pull request.",
-              "Run the relevant repository validation and report changed files and check results.",
-            ].join("\n\n"),
+            prompt: codingPrompt({
+              repository: job.repository, number: job.number,
+              workspacePath: job.workspacePath ?? "", branch: job.workspaceBranch ?? "",
+              title: assignedIssue.title, body: assignedIssue.body,
+            }),
             timeoutSeconds: "1200",
           });
           pipeline = "workflows/coding-issue.lobster";
@@ -476,6 +479,7 @@ export default definePluginEntry({
           ? workflow.output[workflow.output.length - 1] as unknown
           : undefined;
         let codingResult: Record<string, unknown> | undefined;
+        let codingDelivery: CodingDelivery | undefined;
         if (config.coding) {
           if (!isRecord(resultValue)) {
             throw new Error("Coding result was missing; operator inspection is required");
@@ -488,16 +492,39 @@ export default definePluginEntry({
             throw new Error("Coding result was invalid; operator inspection is required");
           }
           codingResult = resultValue;
+          if (workflowStatus === "ok") {
+            const validation = normalizeCodingValidation(resultValue.validation);
+            codingDelivery = {
+              status: "needs-inspection", validation,
+              reason: codingResult.status !== "ok" ? "coding-failed"
+                : validation.status === "failed" ? "validation-failed"
+                  : validation.status === "unknown" ? "validation-unknown" : "worktree-unverified",
+            };
+            if (codingResult.status === "ok" && validation.status === "ok" &&
+                job.workspacePath && job.workspaceBranch && job.baseCommit) {
+              try {
+                const headCommit = await commitTaskDelivery({
+                  repositoryPath: config.coding.repositoryPath, workspacePath: job.workspacePath,
+                  branch: job.workspaceBranch, baseCommit: job.baseCommit, issueNumber: job.number,
+                });
+                codingDelivery = { status: "ready", validation, headCommit };
+              } catch {
+                // Keep the run and validation evidence, but never mark an unverified delivery ready.
+              }
+            }
+          }
         }
         const completed = await patchJob(issue, (current) => ({
           ...current,
-          status: workflowStatus === "ok" && (!config.coding || codingResult?.status === "ok")
+          status: workflowStatus === "ok" && (!config.coding || codingDelivery?.status === "ready")
             ? "completed" : workflowStatus === "cancelled" || (config.coding && codingResult?.status !== "ok")
+              || codingDelivery?.status === "needs-inspection"
               ? "needs-inspection" : "active",
           workflowStatus,
           ...(codingResult && typeof codingResult.runId === "string" ? { codingRunId: codingResult.runId } : {}),
           ...(codingResult && typeof codingResult.status === "string" ? { codingRunStatus: codingResult.status } : {}),
           ...(codingResult && typeof codingResult.text === "string" ? { codingSummary: codingResult.text } : {}),
+          ...(codingDelivery ? { codingDelivery } : {}),
           ...(typeof continuation?.resumeToken === "string" ? { workflowRef: continuation.resumeToken } : {}),
           updatedAt: new Date().toISOString(),
         }));

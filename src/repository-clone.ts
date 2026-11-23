@@ -240,6 +240,14 @@ export async function prepareTaskBase(options: {
   return baseCommit;
 }
 
+async function taskGit(path: string, args: string[]): Promise<string> {
+  return (await execFile("git", ["-C", path,
+    "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
+    "-c", "maintenance.auto=false", "-c", "gc.auto=0", ...args], {
+    timeout: 10_000, maxBuffer: 1_000_000, env: gitEnvironment(),
+  })).stdout.trim();
+}
+
 export async function verifyTaskWorkspace(options: {
   repositoryPath: string; workspacePath: string; branch: string; baseCommit: string;
   newlyCreated: boolean;
@@ -248,9 +256,7 @@ export async function verifyTaskWorkspace(options: {
       !/^[a-f0-9]{40,64}$/.test(options.baseCommit)) {
     throw new Error("Task branch or base binding is invalid; operator inspection is required.");
   }
-  const git = async (path: string, args: string[]) => (await execFile("git", ["-C", path, ...args], {
-    timeout: 10_000, maxBuffer: 16_384, env: gitEnvironment(),
-  })).stdout.trim();
+  const git = taskGit;
   const commonDirectory = async (path: string) => realpath(await git(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"]));
   if (await commonDirectory(options.repositoryPath) !== await commonDirectory(options.workspacePath) ||
       await git(options.workspacePath, ["symbolic-ref", "--short", "HEAD"]) !== options.branch) {
@@ -259,5 +265,55 @@ export async function verifyTaskWorkspace(options: {
   if (options.newlyCreated && await git(options.workspacePath, ["rev-parse", "HEAD"]) !== options.baseCommit) {
     throw new Error("New task worktree does not match the assigned base commit.");
   }
+  // Even status/add may invoke clean filters; reject them before inspecting file changes.
+  const configKeys = (await git(options.workspacePath, ["config", "--name-only", "--list"])).split("\n");
+  if (configKeys.some((key) => /^filter\..*\.(clean|process)$/.test(key))) {
+    throw new Error("Controller delivery requires a repository without executable Git filters.");
+  }
   await git(options.workspacePath, ["merge-base", "--is-ancestor", options.baseCommit, "HEAD"]);
+}
+
+/** Inspect local commits only; this neither writes Git history nor grants publication. */
+export async function verifyTaskDelivery(options: {
+  repositoryPath: string; workspacePath: string; branch: string; baseCommit: string;
+}): Promise<string> {
+  await verifyTaskWorkspace({ ...options, newlyCreated: false });
+  const git = (args: string[]) => taskGit(options.workspacePath, args);
+  const head = await git(["rev-parse", "--verify", "HEAD^{commit}"]);
+  if (!/^[a-f0-9]{40,64}$/.test(head) || head === options.baseCommit) {
+    throw new Error("Coding delivery requires a local task commit.");
+  }
+  if (await git(["status", "--porcelain", "--untracked-files=all"])) {
+    throw new Error("Coding delivery worktree is dirty or contains untracked files.");
+  }
+  // Recheck after inspection; WBS5 must also revalidate this snapshot before push.
+  await verifyTaskWorkspace({ ...options, newlyCreated: false });
+  if (await git(["rev-parse", "HEAD"]) !== head) throw new Error("Coding delivery head changed during inspection.");
+  return head;
+}
+
+export async function commitTaskDelivery(options: {
+  repositoryPath: string; workspacePath: string; branch: string; baseCommit: string; issueNumber: number;
+}): Promise<string> {
+  if (!Number.isSafeInteger(options.issueNumber) || options.issueNumber < 1 ||
+      options.branch !== `openclaw/agent-crew-issue-${options.issueNumber}`) {
+    throw new Error("Commit issue does not match its assigned branch.");
+  }
+  await verifyTaskWorkspace({ ...options, newlyCreated: false });
+  const git = (args: string[]) => taskGit(options.workspacePath, args);
+  const head = await git(["rev-parse", "HEAD"]);
+  if (await git(["status", "--porcelain", "--untracked-files=all"])) {
+    const untracked = (await git(["ls-files", "--others", "--exclude-standard", "-z"])).split("\0");
+    if (untracked.some((path) => path === ".npm" || path.startsWith(".npm/"))) {
+      throw new Error("Project-local npm cache blocks delivery; inspect generated files and use sandbox /tmp.");
+    }
+    await git(["add", "--all", "--", "."]);
+    await verifyTaskWorkspace({ ...options, newlyCreated: false });
+    if (await git(["rev-parse", "HEAD"]) !== head) throw new Error("Task head changed before commit.");
+    await git([
+      "-c", "user.name=Agent Crew", "-c", "user.email=agent-crew@example.invalid",
+      "commit", "--no-gpg-sign", "-m", `chore: implement issue #${options.issueNumber}`,
+    ]);
+  }
+  return verifyTaskDelivery(options);
 }
