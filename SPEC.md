@@ -186,15 +186,18 @@ on resume/retry. With a limit configured, unknown or exhausted usage requires
 inspection before another turn or a committed delivery. Persist unknown before
 execution so interrupted accounting cannot restart from zero. Legacy records
 without cumulative usage remain unknown. This turn-boundary guard does not
-interrupt an in-flight model request; live stop behavior and complete retry/
-compaction coverage remain outstanding. The
+interrupt an in-flight model request. A real one-token-limit test retained
+13146 reported tokens in inspection without a commit. A separate native abort
+stopped the parent run but could not confirm descendant command cleanup; treat
+that outcome as uncertain. Complete retry/compaction coverage remains outstanding:
+the native accumulator can silently ignore an attempt with missing usage. The
 Controller now retains the latest turn's native CLI usage as codingUsage with
 reported/unknown status and exposes only token counts. Agent-authored reports
 cannot supply usage; missing, malformed or unavailable data remains unknown.
 This observational field is not a cumulative budget or completeness guarantee. A read-only qualification confirmed
 that session-row totalTokens measures context rather than cumulative task usage;
 sessions.usage exposes a distinct aggregate. Retry/compaction coverage, missing
-usage detection and live stop behavior remain unqualified; see
+usage detection and complete stop behavior remain unqualified; see
 [token accounting evidence](docs/restart/evidence/wbs4.5-coding-token-qualification.md).
 Each coding task uses a bound thread. Status updates and requests for human input
 are distinct operations: only a confirmed transition to waiting stops the task's

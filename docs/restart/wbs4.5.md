@@ -309,3 +309,9 @@ see the token accounting evidence for the remaining coverage and deployment limi
 Cumulative reported totals, setup-configured token limits and turn-boundary
 inspection guards are now fixture-qualified. In-flight stopping and provider
 retry/compaction completeness remain outstanding; this is not a billing cap.
+
+The token guard is deployed and live-qualified with disposable issue 5: a real
+13146-token turn under a one-token test limit entered inspection with no commit.
+The temporary limit was removed after the test. Native abort stopped a parent
+run but could not confirm command cleanup; missing attempt usage can also escape
+the native aggregate. These remain acceptance gaps, recorded in token evidence.
