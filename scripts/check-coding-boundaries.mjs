@@ -19,10 +19,14 @@ const issue = { repository: "owner/repo", issueNumber: 7 };
 const repositoryPath = "/workspaces/repositories/owner/repo";
 const workspacePath = "/home/node/.openclaw/worktrees/fixture/issue-7";
 const branch = "openclaw/agent-crew-issue-7";
+const sessionKeyForFixture = "agent:coding:agent-crew-" + createHash("sha256").update("owner/repo#7").digest("hex").slice(0, 32);
 
 function harness(initialSession = null, appMode = false, slackDraft = {}) {
   let session = initialSession;
   let codingStatus = "ok";
+  let requestInput;
+  let hasActiveRun = false;
+  let stoppedRunId = "run-7";
   let codingText = "Changed README; validation passed";
   let codingValidation = { status: "ok", checks: [{ command: "npm test", outcome: "ok", exitCode: 0 }] };
   let deliveryFailure = false;
@@ -80,7 +84,7 @@ function harness(initialSession = null, appMode = false, slackDraft = {}) {
         if (failConfigPatch) throw new Error("Simulated config commit transport failure");
         return { ok: true };
       }
-      if (method === "sessions.describe") return { session };
+      if (method === "sessions.describe") return { session: session ? { ...session, key: sessionKeyForFixture, lastRunId: stoppedRunId, hasActiveRun } : null };
       if (method === "sessions.create") {
         session = {
           sessionRoot: workspacePath,
@@ -97,6 +101,7 @@ function harness(initialSession = null, appMode = false, slackDraft = {}) {
         ok: true, status: "ok", output: [{
           runId: "run-7", status: codingStatus, text: codingText,
           workspacePath, workspaceBranch: branch, validation: codingValidation, headCommit: "untrusted-agent-head",
+          ...(requestInput !== undefined ? { requestInput } : {}),
         }],
       } } };
       throw new Error(`Unexpected method: ${method}`);
@@ -134,6 +139,8 @@ function harness(initialSession = null, appMode = false, slackDraft = {}) {
     setCoding(status, text = codingText) { codingStatus = status; codingText = text; },
     setValidation(value) { codingValidation = value; },
     failDelivery() { deliveryFailure = true; },
+    requestInput(value, active = false) { requestInput = value; hasActiveRun = active; },
+    setStoppedRun(value) { stoppedRunId = value; },
   };
 }
 
@@ -294,3 +301,38 @@ for (const inventory of [
 setup.setInventory({ sessions: [] });
 assert.equal((await setup.method("agent-crew.setup.repository.clone", cloneParams)).ok, true);
 console.log("Coding dispatch and setup admission boundary fixtures passed.");
+
+const waiting = harness();
+waiting.requestInput("Choose the expected behavior");
+const waited = await waiting.method("agent-crew.dispatch", issue);
+assert.equal(waited.value.job.status, "waiting");
+assert.equal(waited.value.job.inputRequest, "Choose the expected behavior");
+assert.equal(waited.value.job.codingDelivery, undefined);
+assert.equal(waiting.calls.some(call => call.method === "verify-delivery"), false);
+assert.equal((await waiting.method("agent-crew.dispatch", issue)).value.job.jobId, waited.value.job.jobId);
+assert.equal(waiting.calls.filter(call => call.method === "tools.invoke").length, 1);
+const waitingRestart = harness(waiting.session());
+assert.equal((await waitingRestart.status()).details.job.status, "waiting");
+assert.equal((await waitingRestart.status()).details.job.inputRequest, "Choose the expected behavior");
+waitingRestart.setInventory({ sessions: [{ key: waited.value.job.sessionKey, hasActiveRun: false }] });
+const waitingValidation = await waitingRestart.method("agent-crew.setup.validate", {});
+assert.equal((await waitingRestart.method("agent-crew.setup.apply", { draftHash: waitingValidation.value.draftHash })).ok, false);
+assert.equal(waitingRestart.calls.some(call => call.method === "clone" || call.method === "config.set"), false);
+for (const active of [true, null]) {
+  const uncertainWait = harness();
+  uncertainWait.requestInput("Need confirmation", active);
+  assert.equal((await uncertainWait.method("agent-crew.dispatch", issue)).value.job.status, "needs-inspection");
+}
+const emptyWait = harness();
+emptyWait.requestInput(" ");
+assert.equal((await emptyWait.method("agent-crew.dispatch", issue)).value.job.status, "needs-inspection");
+
+const mismatchedRun = harness();
+mismatchedRun.requestInput("Need confirmation");
+mismatchedRun.setStoppedRun("a-different-native-run");
+assert.equal((await mismatchedRun.method("agent-crew.dispatch", issue)).value.job.status, "needs-inspection");
+const failedWait = harness();
+failedWait.requestInput("Need confirmation");
+failedWait.setCoding("error");
+assert.equal((await failedWait.method("agent-crew.dispatch", issue)).value.job.status, "needs-inspection");
+assert.throws(() => assignedIssueFromSession(waiting.session(), waited.value.job.sessionKey, "owner/repo", "boot"), /assignment/);

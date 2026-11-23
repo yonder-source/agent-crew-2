@@ -82,5 +82,11 @@ export function parseCodingResult(input: string, workspacePath: string, workspac
   const validation = normalizeCodingValidation(isRecord(report) ? report.validation : undefined);
   const summary = isRecord(report) && typeof report.summary === "string" && report.summary.length <= 4_000
     ? report.summary : text;
-  return { runId: result.runId, status: result.status, text: summary, workspacePath, workspaceBranch, validation };
+  const requestInput = isRecord(report) ? report.requestInput : undefined;
+  if (requestInput !== undefined && (typeof requestInput !== "string" ||
+      requestInput.trim().length === 0 || requestInput.length > 4_000)) {
+    throw new Error("Coding input request is invalid.");
+  }
+  return { runId: result.runId, status: result.status, text: summary, workspacePath, workspaceBranch, validation,
+    ...(typeof requestInput === "string" ? { requestInput: requestInput.trim() } : {}) };
 }

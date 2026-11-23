@@ -35,3 +35,11 @@ assert.equal(isCodingDelivery({ status: "ready", validation, headCommit: "a".rep
 assert.equal(isCodingDelivery({ status: "ready", validation: failed, headCommit: "a".repeat(40) }), false);
 assert.equal(isCodingDelivery({ status: "ready", validation }), false);
 console.log("Coding result fixture preserves the assigned workspace and branch.");
+
+const awaitingInput = (requestInput, status = "ok") => JSON.stringify({ runId, status,
+  result: { payloads: [{ text: JSON.stringify({ summary: "Need a decision", requestInput, validation }) }] } });
+assert.equal(parseCodingResult(awaitingInput("  Which behavior?  "), workspacePath, workspaceBranch).requestInput, "Which behavior?");
+for (const question of ["", " ", null, true, "q".repeat(4_001)]) {
+  assert.throws(() => parseCodingResult(awaitingInput(question), workspacePath, workspaceBranch), /input request/);
+}
+assert.equal(structured.requestInput, undefined, "Ordinary status must not cause waiting");

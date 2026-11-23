@@ -212,6 +212,14 @@ authenticated setup RPCs; browser interaction and task-bound interaction remain
 outstanding. See
 [credential readiness evidence](evidence/wbs4.5-slack-credential-readiness.md).
 
+The coding-result waiting boundary is implemented separately: a final
+`requestInput` question becomes retained `waiting` only after the exact native
+run is confirmed stopped, without committing a delivery. Waiting blocks duplicate
+admission, assigned-issue operations and configuration Apply. Native model turns
+have been qualified for same-session/worktree context continuity, but Slack
+thread routing, authorized resume and cumulative budgets remain outstanding.
+See [waiting boundary evidence](evidence/wbs4.5-coding-waiting-qualification.md).
+
 **Small batch 6 — Controller task authorization:** Extend the Controller's
 coding prompt with a structured authorization block naming the assigned issue,
 repository, worktree and branch, and the allowed edit/validation/assigned-issue

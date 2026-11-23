@@ -137,6 +137,15 @@ settings in the Agent Crew configuration, preserving native Slack ingress policy
 and secret references; they do not enable designer execution or task routing.
 Slack-only changes pass the same active/uncertain work guard and runtime
 activation boundary as repository changes.
+A coding turn may return a bounded `requestInput` question in its final JSON
+report. The Controller records `waiting` only after a successful workflow/turn
+and a native session read confirms the exact run is finished. A waiting result
+is not a coding delivery and is never committed as a completed artifact. Persist
+the question with the existing job/session/worktree/base binding, expose it in
+status, reject assigned-issue operations while waiting, and block duplicate
+admission and configuration Apply. Unknown or mismatched stopped-state evidence
+requires inspection. This establishes the waiting boundary; Slack thread
+binding, authorized resumption and cumulative metering still need integration.
 Each coding task uses a bound thread. Status updates and requests for human input
 are distinct operations: only a confirmed transition to waiting stops the task's
 active-time clock. Accept the first authorized reply in the bound thread and

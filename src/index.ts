@@ -17,11 +17,11 @@ import { draftSlackSettings, validateSlackSettings } from "./slack-settings.js";
 import { slackCredentialStatus } from "./slack-credentials.js";
 
 const NAMESPACE = "agent-crew-job";
-const JOB_STATUSES = ["starting", "active", "completed", "needs-inspection", "retry-approved", "abandoned"] as const;
+const JOB_STATUSES = ["starting", "active", "waiting", "completed", "needs-inspection", "retry-approved", "abandoned"] as const;
 const WORKFLOW_STATUSES = ["ok", "needs_approval", "needs_input", "cancelled"] as const;
 type JobStatus = typeof JOB_STATUSES[number];
 type WorkflowStatus = typeof WORKFLOW_STATUSES[number];
-const LOCKED = new Set(["starting", "active", "completed", "needs-inspection", "abandoned"]);
+const LOCKED = new Set(["starting", "active", "waiting", "completed", "needs-inspection", "abandoned"]);
 const DRAFT_FIELDS = [
   "githubAppId", "repository", "installationId", "repositoryPath", "codingAgentId", "designerAgentId",
   "codingChannelId", "designerChannelId", "codingUserIds", "designerUserIds", "tokenBudget",
@@ -73,6 +73,7 @@ type Job = Issue & {
   codingRunId?: string;
   codingRunStatus?: string;
   codingSummary?: string;
+  inputRequest?: string;
   workspacePath?: string;
   workspaceBranch?: string;
   baseCommit?: string;
@@ -102,6 +103,10 @@ function isJob(value: unknown): value is Job {
       (value.workflowStatus !== undefined && !isWorkflowStatus(value.workflowStatus)) ||
       (value.codingRunId !== undefined && typeof value.codingRunId !== "string") ||
       (value.codingRunStatus !== undefined && typeof value.codingRunStatus !== "string") ||
+      (value.inputRequest !== undefined && (typeof value.inputRequest !== "string" || !value.inputRequest.trim() || value.inputRequest.length > 4_000)) ||
+      (value.status === "waiting" && (typeof value.inputRequest !== "string" || value.codingRunStatus !== "ok" ||
+        typeof value.codingRunId !== "string" || !value.codingRunId || typeof value.workspacePath !== "string" ||
+        typeof value.workspaceBranch !== "string" || typeof value.baseCommit !== "string")) ||
       (value.codingSummary !== undefined && typeof value.codingSummary !== "string") ||
       (value.workspacePath !== undefined && typeof value.workspacePath !== "string") ||
       (value.workspaceBranch !== undefined && typeof value.workspaceBranch !== "string") ||
@@ -127,6 +132,7 @@ function publicJob(job: Job) {
     ...(job.workflowStatus !== undefined ? { workflowStatus: job.workflowStatus } : {}),
     ...(job.codingRunId !== undefined ? { codingRunId: job.codingRunId } : {}),
     ...(job.codingRunStatus !== undefined ? { codingRunStatus: job.codingRunStatus } : {}),
+    ...(job.inputRequest !== undefined ? { inputRequest: job.inputRequest } : {}),
     ...(job.codingSummary !== undefined ? { codingSummary: job.codingSummary } : {}),
     ...(job.workspacePath !== undefined ? { workspacePath: job.workspacePath } : {}),
     ...(job.workspaceBranch !== undefined ? { workspaceBranch: job.workspaceBranch } : {}),
@@ -334,7 +340,7 @@ export default definePluginEntry({
         const job = jobValue;
         const approvedRetry = job.status === "retry-approved" && job.jobId === approvedRetryJobId;
         if (approvedRetry) approvedRetryFound = true;
-        if ((!approvedRetry && ["starting", "active", "needs-inspection", "retry-approved"].includes(job.status)) ||
+        if ((!approvedRetry && ["starting", "active", "waiting", "needs-inspection", "retry-approved"].includes(job.status)) ||
             (job.issueUpdate !== undefined && ["writing", "needs-inspection", "retry-approved", "abandoned"].includes(job.issueUpdate.status))) {
           throw new Error("An Agent Crew coding task is active or uncertain; repository checkout is blocked.");
         }
@@ -482,6 +488,7 @@ export default definePluginEntry({
           : undefined;
         let codingResult: Record<string, unknown> | undefined;
         let codingDelivery: CodingDelivery | undefined;
+        let inputRequest: string | undefined;
         if (config.coding) {
           if (!isRecord(resultValue)) {
             throw new Error("Coding result was missing; operator inspection is required");
@@ -494,7 +501,20 @@ export default definePluginEntry({
             throw new Error("Coding result was invalid; operator inspection is required");
           }
           codingResult = resultValue;
-          if (workflowStatus === "ok") {
+          if (resultValue.requestInput !== undefined) {
+            if (typeof resultValue.requestInput !== "string" || !resultValue.requestInput.trim() ||
+                resultValue.requestInput.length > 4_000 || workflowStatus !== "ok" || codingResult.status !== "ok") {
+              throw new Error("Coding input request is invalid or the turn did not finish successfully.");
+            }
+            const stopped: unknown = await call("sessions.describe", { key: job.sessionKey });
+            if (!isRecord(stopped) || !isRecord(stopped.session) || stopped.session.key !== job.sessionKey ||
+                stopped.session.lastRunId !== resultValue.runId || stopped.session.hasActiveRun !== false ||
+                (Array.isArray(stopped.session.activeRunIds) && stopped.session.activeRunIds.length > 0)) {
+              throw new Error("Coding run stopped state could not be confirmed.");
+            }
+            inputRequest = resultValue.requestInput.trim();
+          }
+          if (workflowStatus === "ok" && inputRequest === undefined) {
             const validation = normalizeCodingValidation(resultValue.validation);
             codingDelivery = {
               status: "needs-inspection", validation,
@@ -518,11 +538,12 @@ export default definePluginEntry({
         }
         const completed = await patchJob(issue, (current) => ({
           ...current,
-          status: workflowStatus === "ok" && (!config.coding || codingDelivery?.status === "ready")
+          status: inputRequest !== undefined ? "waiting" : workflowStatus === "ok" && (!config.coding || codingDelivery?.status === "ready")
             ? "completed" : workflowStatus === "cancelled" || (config.coding && codingResult?.status !== "ok")
               || codingDelivery?.status === "needs-inspection"
               ? "needs-inspection" : "active",
           workflowStatus,
+          ...(inputRequest !== undefined ? { inputRequest } : {}),
           ...(codingResult && typeof codingResult.runId === "string" ? { codingRunId: codingResult.runId } : {}),
           ...(codingResult && typeof codingResult.status === "string" ? { codingRunStatus: codingResult.status } : {}),
           ...(codingResult && typeof codingResult.text === "string" ? { codingSummary: codingResult.text } : {}),
