@@ -275,10 +275,34 @@ Distinguish safe task-preparation failures from GitHub query failures in polling
 status; report dirty source, branch collision, unavailable remote main and local
 ahead/divergent main without exposing raw Git output or credentials.
 Bind the job, session, issue, repository, worktree, branch and base commit in
-retained Controller state. Small batch 6 adds local committed deliverables,
+retained Controller state. Small batch 6 requires local committed deliverables,
 structured validation evidence and a Controller-verified head SHA. WBS5 obtains
 these values from that state and independently checks publication eligibility;
 agent-supplied validation is evidence, not publication authorization.
+The coding agent edits and validates in its assigned sandbox and reports
+validation as structured records with command, outcome, exit code when available,
+and summary. Missing or malformed validation is unknown, not successful. Keep
+npm caches under sandbox `/tmp`, outside project contents; an untracked project
+`.npm/` blocks Controller commit rather than being included in delivery. After successful
+coding and validation, the Controller checks the assigned managed worktree and
+branch/base binding, commits reconciled changes locally using a Conventional
+Commit, and verifies the resulting head and clean state before retaining the
+delivery. Disable Git hooks, automatic maintenance and signing for that commit;
+reject configured executable clean/process filters before file inspection or
+staging. A failed or uncertain commit requires inspection before another coding
+attempt. The retained starting job blocks automatic restart/retry if the process
+stops before recording the commit result. WBS5 publishes that
+bound branch and head without recreating the branch; remote main advancing after
+task preparation alone does not invalidate the recorded base.
+The retained `codingDelivery` contains validation and either `ready` with the
+Controller-read `headCommit`, or `needs-inspection` with a coding, validation or
+worktree inspection reason. A successful model turn alone cannot complete a
+coding task. WBS5 rechecks this delivery before any publication.
+Pinned runtime sandbox Git metadata is private: accepted file changes reconcile
+to the managed worktree, while guest commits do not advance its HEAD. Agents do
+not commit; the Controller commits the accepted changes without importing guest
+Git metadata. It neither trusts guest-reported SHAs nor runs task validation on
+the credential-bearing Gateway.
 
 Qualify this behavior together with Git operations and isolation inside the
 coding sandbox through the WBS4.5 integration check.

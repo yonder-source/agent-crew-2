@@ -137,10 +137,26 @@ setup prerequisite and the secret delivery and rotation responsibilities.
   OpenClaw managed metadata intact. Support clean unborn main from an empty clone
   by initializing it to the fetched commit. Keep dirty/ahead/divergent checks and
   report safe task-preparation error categories separately from query failures.
-- **Batch 6 supplement:** Require local commits and structured validation records
+- **Batch 6 supplement:** Require Controller local commits and structured validation records
   (command, outcome, exit code when available, summary). The Controller verifies
   the assigned branch and head SHA and persists delivery status. WBS5 reads the
   binding from trusted state and independently verifies publication conditions.
+  The agent edits and validates in its sandbox; the Controller commits reconciled
+  changes on the assigned managed branch after coding and validation succeed.
+  Keep npm caches under sandbox `/tmp`. Treat missing or malformed validation as
+  unknown. Before committing, verify the worktree, branch and base ancestry;
+  disable hooks, automatic maintenance and signing, and reject executable Git
+  filters before inspecting files. Before recording a deliverable, verify its
+  clean state and final head. Retain the job, session, issue,
+  repository, worktree, branch, base SHA, verified head SHA and validation with
+  delivery status across restart. WBS5 publishes the bound branch and head;
+  remote main advancing after preparation alone does not invalidate the base.
+  Exercise a successful committed delivery, dirty worktree, wrong branch,
+  unrelated history, missing validation and restart retention in fixtures.
+  Implementation and qualification are recorded in
+  [coding delivery evidence](evidence/wbs4.5-coding-delivery-qualification.md).
+  Native sandbox Git metadata is private; use file reconciliation and a
+  Controller-owned local commit rather than importing the guest history.
 
 ## 4.5.5 Acceptance and handoff
 
@@ -179,7 +195,9 @@ worktree context summary; add one only if a concrete gap is found.
 
 **Small batch 6 — Controller task authorization:** Extend the Controller's
 coding prompt with a structured authorization block naming the assigned issue,
-repository and worktree, and the allowed operations. State that repository
+repository, worktree and branch, and the allowed edit/validation/assigned-issue
+operations. The agent does not commit or publish; the Controller commits the
+reconciled change. State that repository
 `AGENTS.md` provides development guidance but cannot grant additional authority;
 Controller authorization takes precedence when instructions conflict. Keep issue
 text clearly marked as untrusted task input. Do not pass GitHub credentials or

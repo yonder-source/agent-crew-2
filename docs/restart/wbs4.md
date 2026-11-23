@@ -67,7 +67,9 @@ do not start a coding turn.
 
 **Work:** Pass the coding agent's result to the next Lobster step. Include the
 assigned workspace path and branch alongside the run ID, status and validation
-summary so WBS5 can identify the exact change to review and publish.
+summary so WBS5 can identify the exact change to review and publish. WBS4.5
+extends this result with structured validation and Controller-verified local
+commits; its delivery contract owns the retained base and head SHA binding.
 
 **Done when:** Lobster receives a validated run ID, status, workspace path,
 branch and validation summary from the assigned run. A timeout, malformed result or

@@ -10,6 +10,8 @@ The [root SPEC](../../SPEC.md) defines the MVP workflow.
 
 - [WBS4.5](wbs4.5.md) provides the repository connection and GitHub App
   authentication and qualifies coding sandbox Git operations.
+- WBS4.5 supplies a retained task binding, local commits, structured validation
+  and a Controller-verified head SHA. Missing or unverified delivery blocks push.
 - A disposable GitHub test repository is connected with permissions for
   publication.
 
@@ -18,6 +20,10 @@ The [root SPEC](../../SPEC.md) defines the MVP workflow.
 **Work:** Add the Controller API needed to submit the result from the assigned
 coding session. Use the issue and repository assignment to identify the work
 and the source to publish.
+Read the job, coding session, issue, repository, worktree, branch, base SHA,
+head SHA and validation from Controller-owned state, associated with the trusted
+Lobster workflow. Do not derive authorization from caller-supplied identities.
+Require coding and validation status `ok` and a `ready` coding delivery.
 
 **Done when:** The Controller accepts a result from the assigned session and
 rejects an unbound session or a request for a different issue. The result
@@ -29,6 +35,12 @@ See [assignment rejection](../../SPEC.md#error-assignment).
 **Work:** Have the Controller prepare and push the assigned work to a task
 branch in the configured repository. Keep publication credentials with the
 Controller.
+Publish the recorded `openclaw/agent-crew-issue-<number>` branch and verified
+head without renaming, recreating, rebasing or creating a second commit.
+Recheck the bound worktree, branch, clean state, head and base ancestry before
+push; a changed head requires inspection. Remote `main` advancing after task
+preparation alone does not invalidate the base. An existing incompatible remote
+task branch blocks publication rather than triggering a force push.
 
 **Done when:** A valid test result produces a branch containing the intended
 change. A request cannot choose an unrelated repository or issue. An uncertain
