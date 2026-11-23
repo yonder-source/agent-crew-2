@@ -57,7 +57,7 @@ for (const usage of [null, {}, {total: -1}, {total: 1.5}, {total: Number.MAX_SAF
   assert.deepEqual(usageResult(usage).usage, {status: "unknown"});
 }
 assert.deepEqual(usageResult({total: 0, input: 0, output: 0}).usage,
-  {status: "reported", total: 0, input: 0, output: 0});
+  {status: "unknown"});
 assert.deepEqual(usageResult({...nativeUsage, secret: "discard"}).usage, {status: "reported", ...nativeUsage});
 
 assert.deepEqual(usageResult({...nativeUsage, usageReport: {state: "available"}}).usage,
@@ -69,3 +69,6 @@ assert.deepEqual(addCodingUsage({status: "reported", total: Number.MAX_SAFE_INTE
 assert.equal(parseTokenBudget(""), undefined);
 assert.equal(parseTokenBudget("100"), 100);
 for (const limit of ["0", "-1", "1.5", "01", "1e3", " 100", "NaN", "9007199254740992"]) assert.throws(() => parseTokenBudget(limit));
+
+assert.deepEqual(usageResult({total: 0, input: 0, output: 0, usageReport: {state: "available"}}).usage,
+  {status: "reported", total: 0, input: 0, output: 0});

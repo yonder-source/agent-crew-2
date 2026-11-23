@@ -22,8 +22,9 @@ function isTokenCount(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
-export function normalizeCodingUsage(value: unknown): CodingUsage {
+export function normalizeCodingUsage(value: unknown, requireMeasuredZero = false): CodingUsage {
   if (!isRecord(value) || !isTokenCount(value.total) ||
+      (requireMeasuredZero && value.total === 0 && (!isRecord(value.usageReport) || value.usageReport.state !== "available")) ||
       (value.usageReport !== undefined && (!isRecord(value.usageReport) || value.usageReport.state !== "available")) ||
       USAGE_COMPONENTS.some(key => value[key] !== undefined && !isTokenCount(value[key]))) return { status: "unknown" };
   let components = 0;
@@ -125,7 +126,7 @@ export function parseCodingResult(input: string, workspacePath: string, workspac
   const runResult = isRecord(result.result) ? result.result : undefined;
   const meta = isRecord(runResult?.meta) ? runResult.meta : undefined;
   const agentMeta = isRecord(meta?.agentMeta) ? meta.agentMeta : undefined;
-  const usage = normalizeCodingUsage(agentMeta?.usage);
+  const usage = normalizeCodingUsage(agentMeta?.usage, true);
   const payloads = isArray(runResult?.payloads) ? runResult.payloads : [];
   const text = payloads
     .filter((payload): payload is Record<string, unknown> & { text: string } =>

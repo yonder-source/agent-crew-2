@@ -217,7 +217,8 @@ The coding-result waiting boundary is implemented separately: a final
 run is confirmed stopped, without committing a delivery. Waiting blocks duplicate
 admission, assigned-issue operations and configuration Apply. Native model turns
 have been qualified for same-session/worktree context continuity. Slack thread
-routing is now live-qualified; token budgets remain outstanding. Operator-admin resume now
+routing is now live-qualified; token configuration and the turn-boundary guard
+are implemented, with accounting/stop qualifications recorded below. Operator-admin resume now
 reuses the retained job/session/worktree, rejects concurrent/stale replies and
 uses the remaining cumulative active-time budget. It is now deployed and
 live-qualified through the Slack adapter; earlier fixture details remain in
@@ -307,11 +308,17 @@ and fixture-qualified. It supplies the cumulative guard described below;
 see the token accounting evidence for the remaining coverage and deployment limits.
 
 Cumulative reported totals, setup-configured token limits and turn-boundary
-inspection guards are now fixture-qualified. In-flight stopping and provider
-retry/compaction completeness remain outstanding; this is not a billing cap.
+inspection guards are implemented. Missing-report accounting and native process
+stopping have the corrections and qualifications below; this is not a billing cap.
 
 The token guard is deployed and live-qualified with disposable issue 5: a real
 13146-token turn under a one-token test limit entered inspection with no commit.
-The temporary limit was removed after the test. Native abort stopped a parent
-run but could not confirm command cleanup; missing attempt usage can also escape
-the native aggregate. These remain acceptance gaps, recorded in token evidence.
+The temporary limit was removed after the test. That initial qualification
+exposed an abort-confirmation error and missing-attempt aggregation; both were
+subsequently corrected as recorded below and in token evidence.
+
+Pinned runtime corrections now invalidate aggregates containing a missing attempt
+and separate confirmed process termination from workspace checkpoint errors.
+Native regressions preserve real termination failures as uncertain and artifact
+failures as visible. Live post-correction qualification is recorded in the token
+evidence; provider-internal unreported work cannot be inferred from counters.
