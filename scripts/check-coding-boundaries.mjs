@@ -1,3 +1,4 @@
+import { authorizesSlackTaskReply, isReplyAfterSlackConnection, parseSlackTaskReply } from "../dist/slack-task-reply.js";
 import { isSlackTaskThread } from "../dist/slack-task-thread.js";
 import { TaskBaseError } from "../dist/repository-clone.js";
 import assert from "node:assert/strict";
@@ -24,9 +25,11 @@ const sessionKeyForFixture = "agent:coding:agent-crew-" + createHash("sha256").u
 
 function harness(initialSession = null, appMode = false, slackDraft = {}, slackConfig) {
   let session = initialSession;
+  let connectedAt = 100_000;
   const slackMessages = [];
   let failSlackAt;
   let failSlackPersistence;
+  let failAcceptedReplyPatch = false;
   const extraSessions = new Map();
   let clock = 0;
   let turnMs = 1_234;
@@ -46,8 +49,9 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
     codingAgentId: "coding", designerAgentId: "", codingChannelId: "", designerChannelId: "", codingUserIds: "", designerUserIds: "", tokenBudget: "", ...slackDraft };
   const calls = [];
   const methods = new Map();
+  const hooks = new Map();
   const registeredTools = new Map();
-  const context = createContext({ isSlackTaskThread,
+  const context = createContext({ authorizesSlackTaskReply, isReplyAfterSlackConnection, parseSlackTaskReply, isSlackTaskThread,
     postTaskSlackMessage: async (channelId, text, threadTs) => {
       const retained = session.pluginExtensions[0].value;
       assert.equal(retained.slackThread.status, threadTs ? "ready" : "creating");
@@ -95,6 +99,7 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
     definePluginEntry: (entry) => entry,
     callGatewayFromCli: async (method, _options, params) => {
       calls.push({ method, params });
+      if (method === "channels.status") return { channelAccounts: { slack: [{ accountId: "default", running: true, connected: true, lastConnectedAt: connectedAt }] } };
       if (method === "sessions.list") return inventory;
       if (method === "agents.list") return { agents: [{ id: "coding" }] };
       if (method === "config.get") return { hash: "fixture-revision", config: {
@@ -118,6 +123,10 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
       }
       if (method === "sessions.pluginPatch") {
         const thread = params.value.slackThread;
+        if (failAcceptedReplyPatch && params.value.status === "starting" && thread?.acceptedReplyTs) {
+          session.pluginExtensions = [{ pluginId: "agent-crew", namespace: "agent-crew-job", value: params.value }];
+          throw new Error("Secret-bearing acknowledgement failure");
+        }
         if ((failSlackPersistence === "root" && thread?.status === "ready") ||
             (failSlackPersistence === "sent" && thread?.input?.status === "sent")) {
           throw new Error("Secret-bearing persistence failure");
@@ -146,7 +155,8 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
     session: { state: { registerSessionExtension() {} } },
     registerTool: (tool) => registeredTools.set(tool.name, tool),
     registerGatewayMethod: (name, handler, options) => methods.set(name, { handler, options }),
-    registerService() {},
+    on(name, handler) { hooks.set(name, handler); },
+  registerService() {},
     logger: { info() {}, error() {} },
   });
   async function method(name, params) {
@@ -159,7 +169,10 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
   }
   return {
     calls, slackMessages,
+    reconnectAt(value) { connectedAt = value; },
+    inbound(event, context) { return hooks.get("before_dispatch")(event, context); },
     failSlackMessageAt(value) { failSlackAt = value; },
+    failAcceptedReply() { failAcceptedReplyPatch = true; },
     failSlackPersistenceAt(value) { failSlackPersistence = value; },
     methodScope(name) { return methods.get(name).options.scope; },
     setInventory(value) { inventory = value; },
@@ -519,3 +532,55 @@ for (const stage of ["root", "sent"]) {
   await lostAck.method("agent-crew.dispatch", issue);
   assert.equal(lostAck.slackMessages.length, stage === "root" ? 1 : 2, "Do not replay acknowledged sends after metadata failure");
 }
+
+const slackEvent = { channel: "slack", content: "Use the smaller change", senderId: "U123", messageId: "100.000003" };
+const slackContext = { channelId: "slack", accountId: "default", senderId: "U123", messageId: "100.000003",
+  sessionKey: "agent:main:slack:channel:C123:thread:100.000001" };
+const inboundSnapshot = structuredClone(slackWait.session());
+const inbound = harness(inboundSnapshot, false, {}, slackConfig);
+inbound.setInventory({ sessions: [{ key: slackWaited.value.job.sessionKey, hasActiveRun: false }] });
+inbound.holdRun();
+const claimed = await inbound.inbound(slackEvent, slackContext);
+assert.equal(claimed.handled, true);
+assert.equal(inbound.session().pluginExtensions[0].value.status, "starting");
+assert.equal(inbound.session().pluginExtensions[0].value.slackThread.acceptedReplyTs, "100.000003");
+const secondReply = await inbound.inbound({ ...slackEvent, messageId: "100.000004" }, { ...slackContext, messageId: "100.000004" });
+assert.match(secondReply.text, /busy/);
+inbound.releaseRun();
+await new Promise(resolve => setTimeout(resolve, 0));
+assert.equal(inbound.session().pluginExtensions[0].value.status, "completed");
+assert.equal(inbound.calls.filter(call => call.method === "tools.invoke").length, 1);
+await inbound.inbound(slackEvent, slackContext);
+assert.equal(inbound.calls.filter(call => call.method === "tools.invoke").length, 1, "Slack event redelivery must not repeat execution");
+
+for (const [event, context] of [
+  [{ ...slackEvent, senderId: "U999" }, { ...slackContext, senderId: "U999" }],
+  [slackEvent, { ...slackContext, accountId: "other" }],
+  [slackEvent, { ...slackContext, sessionKey: "agent:main:slack:channel:C123" }],
+  [{ ...slackEvent, messageId: "100.000001" }, { ...slackContext, messageId: "100.000001" }],
+]) {
+  const denied = harness(structuredClone(slackWait.session()), false, {}, slackConfig);
+  denied.setInventory({ sessions: [{ key: slackWaited.value.job.sessionKey, hasActiveRun: false }] });
+  assert.equal((await denied.inbound(event, context)).handled, true);
+  assert.equal(denied.calls.some(call => call.method === "tools.invoke"), false);
+}
+
+const offlineReply = harness(structuredClone(slackWait.session()), false, {}, slackConfig);
+offlineReply.reconnectAt(101_000);
+assert.equal((await offlineReply.inbound(slackEvent, slackContext)).handled, true);
+assert.equal(offlineReply.calls.some(call => call.method === "tools.invoke"), false,
+  "A reply sent before the current Slack connection must be resent after reconnect");
+
+const incompleteReplyInventory = harness(structuredClone(slackWait.session()), false, {}, slackConfig);
+incompleteReplyInventory.setInventory({ sessions: [], hasMore: true });
+assert.equal((await incompleteReplyInventory.inbound(slackEvent, slackContext)).handled, true);
+assert.equal(incompleteReplyInventory.calls.some(call => call.method === "tools.invoke"), false);
+assert.equal(await incompleteReplyInventory.inbound({ ...slackEvent, channel: "webchat" }, { ...slackContext, channelId: "webchat" }), undefined);
+const acceptedAckLost = harness(structuredClone(slackWait.session()), false, {}, slackConfig);
+acceptedAckLost.setInventory({ sessions: [{ key: slackWaited.value.job.sessionKey, hasActiveRun: false }] });
+acceptedAckLost.failAcceptedReply();
+assert.equal((await acceptedAckLost.inbound(slackEvent, slackContext)).handled, true);
+assert.equal(acceptedAckLost.calls.some(call => call.method === "tools.invoke"), false);
+assert.equal((await acceptedAckLost.status()).details.job.status, "needs-inspection");
+await acceptedAckLost.inbound(slackEvent, slackContext);
+assert.equal(acceptedAckLost.calls.some(call => call.method === "tools.invoke"), false);

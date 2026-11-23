@@ -15,6 +15,7 @@ import { normalizeCodingValidation, isCodingDelivery, type CodingDelivery } from
 import { validateCheckout, type ConnectionCheck } from "./repository-validation.js";
 import { connectionConfig } from "./setup-config.js";
 import { draftSlackSettings, validateSlackSettings } from "./slack-settings.js";
+import { authorizesSlackTaskReply, isReplyAfterSlackConnection, parseSlackTaskReply, type SlackTaskReply } from "./slack-task-reply.js";
 import { isSlackTaskThread, postTaskSlackMessage, type SlackTaskThread } from "./slack-task-thread.js";
 import { slackCredentialStatus } from "./slack-credentials.js";
 
@@ -424,7 +425,7 @@ export default definePluginEntry({
       return patchJob(issue, (current) => ({ ...current, slackThread: { ...thread, input: sent } }));
     };
 
-    const dispatchIssue = (issue: Issue, operatorRetry = false, resume?: { expectedRunId: string; input: string }): Promise<Job> => {
+    const dispatchIssue = (issue: Issue, operatorRetry = false, resume?: { expectedRunId: string; input: string; slackReply?: SlackTaskReply; onAdmitted?: () => void }): Promise<Job> => {
       const requestedEpoch = admissionEpoch;
       const admissionWasOpen = !setupApplying && pollingReady;
       pendingDispatches += 1;
@@ -440,6 +441,10 @@ export default definePluginEntry({
             !config.coding || !config.github || issue.repository !== config.github.repository ||
             existing.connection?.agentId !== config.coding.agentId || existing.connection.repositoryPath !== config.coding.repositoryPath ||
             existing.activeMs === undefined || existing.activeTimeUncertain === true) throw new Error("Waiting task binding or elapsed usage requires inspection.");
+        if (resume.slackReply && (!existing.slackThread ||
+            !authorizesSlackTaskReply(existing.slackThread, resume.slackReply, resume.expectedRunId))) {
+          throw new Error("Slack reply no longer matches the authorized waiting question.");
+        }
         const view = await session;
         if (!view || !existing.codingSessionId || view.session.sessionId !== existing.codingSessionId ||
             view.session.lastRunId !== resume.expectedRunId || view.session.hasActiveRun !== false ||
@@ -521,13 +526,15 @@ export default definePluginEntry({
           ...(resume ? { jobId: current.jobId, codingSessionId: current.codingSessionId } : {}),
           ...(config.coding ? { activeMs: usedMs, activeTimeUncertain: true } : {}),
           ...(workspace && baseCommit ? { workspacePath: workspace.path, workspaceBranch: workspace.branch, baseCommit } : {}),
-          ...(current.slackThread ? { slackThread: current.slackThread } : {}),
+          ...(current.slackThread ? { slackThread: { ...current.slackThread,
+            ...(resume?.slackReply ? { acceptedReplyTs: resume.slackReply.messageTs } : {}) } } : {}),
           ...(current.decision ? { decision: current.decision } : {}),
           ...(current.issueUpdate ? { issueUpdate: current.issueUpdate } : {}),
         }))
           : { ...baseJob(issue), ...(workspace && baseCommit ? { workspacePath: workspace.path, workspaceBranch: workspace.branch, baseCommit } : {}) };
       startingJobId = job.jobId;
       if (!existing) await writeJob(issue, config.coding ? { ...job, activeTimeUncertain: true } : job);
+      resume?.onAdmitted?.();
       let turnStartedAt: number | undefined;
       let activeMs = usedMs;
       let turnSubmitted = false;
@@ -932,26 +939,92 @@ export default definePluginEntry({
 
     // Claim before queueing: later replies must receive busy, never become steering.
     const pendingResumes = new Set<string>();
+    const resumeTask = async (issue: Issue, expectedRunId: string, input: string, slackReply?: SlackTaskReply, onAdmitted?: () => void): Promise<Job> => {
+      const key = issueSessionKey(issue);
+      if (pendingResumes.has(key)) throw new Error("Task is busy; wait for another input request.");
+      pendingResumes.add(key);
+      try { return await dispatchIssue(issue, false, { expectedRunId, input, ...(slackReply ? { slackReply } : {}), ...(onAdmitted ? { onAdmitted } : {}) }); }
+      finally { pendingResumes.delete(key); }
+    };
     api.registerGatewayMethod("agent-crew.resume", async ({ params, respond }) => {
-      let claimed: string | undefined;
       try {
         if (!isRecord(params) || typeof params.expectedRunId !== "string" || !params.expectedRunId || params.expectedRunId.length > 200 ||
             typeof params.input !== "string" || !params.input.trim() || params.input.length > 16_000) {
           throw new Error("Resume requires the waiting run ID and bounded human input.");
         }
         const issue = parseIssue(params.repository, params.issueNumber);
-        const key = issueSessionKey(issue);
-        if (pendingResumes.has(key)) throw new Error("Task is busy; wait for another input request.");
-        pendingResumes.add(key);
-        claimed = key;
-        const job = await dispatchIssue(issue, false, { expectedRunId: params.expectedRunId, input: params.input });
+        const job = await resumeTask(issue, params.expectedRunId, params.input);
         respond(true, { status: job.status, job: publicJob(job) });
       } catch (error) {
         respond(false, undefined, { code: "TASK_RESUME_BLOCKED", message: error instanceof Error ? error.message : "Task resume requires inspection." });
-      } finally {
-        if (claimed !== undefined) pendingResumes.delete(claimed);
       }
     }, { scope: "operator.admin" });
+
+    const claimedSlackThreads = new Map<string, symbol>();
+    api.on("before_dispatch", async (event, context) => {
+      if (context.channelId !== "slack" || !config.slack?.coding) return;
+      // This installation owns Slack task input. Never fall through to an ordinary model turn.
+      let releaseClaim: (() => void) | undefined;
+      try {
+        const reply = parseSlackTaskReply(event, context);
+        const setting = config.slack.coding;
+        if (!reply || reply.channelId !== setting.channelId || !setting.userIds.includes(reply.userId)) return { handled: true };
+        const threadKey = `${reply.channelId}:${reply.threadTs}`;
+        if (claimedSlackThreads.has(threadKey)) return { handled: true, text: "Task is busy; wait for another input request." };
+        const claimToken = Symbol();
+        claimedSlackThreads.set(threadKey, claimToken);
+        const release = () => { if (claimedSlackThreads.get(threadKey) === claimToken) claimedSlackThreads.delete(threadKey); };
+        releaseClaim = release;
+        const transport: unknown = await call("channels.status", { probe: false });
+        const accounts = isRecord(transport) && isRecord(transport.channelAccounts) && Array.isArray(transport.channelAccounts.slack)
+          ? transport.channelAccounts.slack as unknown[] : [];
+        const defaults = accounts.filter(account => isRecord(account) && account.accountId === "default");
+        const account = defaults[0];
+        if (defaults.length !== 1 || !isRecord(account) || account.running !== true || account.connected !== true ||
+            !isReplyAfterSlackConnection(reply, account.lastConnectedAt)) return { handled: true };
+        const inventory: unknown = await call("sessions.list", { archived: "all", limit: 5000 });
+        if (!isRecord(inventory) || !Array.isArray(inventory.sessions) || inventory.sessions.length >= 5000 ||
+            inventory.hasMore === true || (typeof inventory.totalCount === "number" && inventory.totalCount > inventory.sessions.length) ||
+            (typeof inventory.nextOffset === "number" && inventory.nextOffset > 0) ||
+            (typeof inventory.nextCursor === "string" && inventory.nextCursor)) throw new Error("Incomplete task inventory");
+        const matches: Job[] = [];
+        for (const row of inventory.sessions) {
+          if (!isRecord(row) || typeof row.key !== "string" || !/^agent:[a-z][a-z0-9_-]*:agent-crew-[a-f0-9]{32}$/.test(row.key)) continue;
+          const described: unknown = await call("sessions.describe", { key: row.key });
+          if (!isRecord(described) || !isRecord(described.session) || !Array.isArray(described.session.pluginExtensions)) throw new Error("Unknown task state");
+          const extensions: unknown[] = described.session.pluginExtensions;
+          const entries = extensions.filter(value => isRecord(value) && value.pluginId === "agent-crew" && value.namespace === NAMESPACE);
+          if (entries.length !== 1 || !isRecord(entries[0]) || !isJob(entries[0].value)) throw new Error("Unknown task binding");
+          const job = entries[0].value;
+          if (job.slackThread?.channelId === reply.channelId && job.slackThread.threadTs === reply.threadTs) {
+            if (job.sessionKey !== row.key || job.sessionKey !== issueSessionKey(job) || job.repository !== config.github?.repository) throw new Error("Task identity changed");
+            matches.push(job);
+          }
+        }
+        if (matches.length > 1) throw new Error("Ambiguous task thread binding");
+        if (matches.length === 0) return { handled: true };
+        const job = matches[0];
+        if (!job || !job.slackThread || !job.codingRunId) return { handled: true };
+        if (pendingResumes.has(job.sessionKey) || job.status === "starting" || job.status === "active") {
+          return { handled: true, text: "Task is busy; wait for another input request." };
+        }
+        if (job.status !== "waiting" || !authorizesSlackTaskReply(job.slackThread, reply, job.codingRunId)) return { handled: true };
+        let accept: () => void = () => {};
+        const admitted = new Promise<"accepted">((resolve) => { accept = () => resolve("accepted"); });
+        const execution = resumeTask(job, job.codingRunId, reply.text, reply, accept);
+        // The durable starting marker owns recovery if this process stops after acceptance.
+        const settled = execution.then(() => "settled" as const, () => "failed" as const)
+          .finally(release);
+        const outcome = await Promise.race([admitted, settled]);
+        if (outcome !== "accepted") return { handled: true, text: "Task reply requires operator inspection; no automatic retry was started." };
+        releaseClaim = undefined; // The background execution owns the claim until it settles.
+        return { handled: true };
+      } catch {
+        return { handled: true, text: "Task reply requires operator inspection; no automatic retry was started." };
+      } finally {
+        releaseClaim?.();
+      }
+    });
 
     api.registerGatewayMethod("agent-crew.resolve", async ({ params, respond }) => {
         try {

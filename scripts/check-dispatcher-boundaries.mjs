@@ -1,3 +1,4 @@
+import { authorizesSlackTaskReply, isReplyAfterSlackConnection, parseSlackTaskReply } from "../dist/slack-task-reply.js";
 import { isSlackTaskThread, postTaskSlackMessage } from "../dist/slack-task-thread.js";
 import { performance } from "node:perf_hooks";
 import { TaskBaseError } from "../dist/repository-clone.js";
@@ -25,7 +26,7 @@ const workflowRelease = new Promise((resolve) => { releaseWorkflowResolve = reso
 const tools = new Map();
 const methods = new Map();
 let issueToolFactory;
-const context = createContext({ isSlackTaskThread, postTaskSlackMessage, performance,
+const context = createContext({ authorizesSlackTaskReply, isReplyAfterSlackConnection, parseSlackTaskReply, isSlackTaskThread, postTaskSlackMessage, performance,
   TaskBaseError, createHash, randomUUID, isCodingDelivery, process: { env: { AGENT_CREW_GATEWAY_TOKEN: "test" } },
   assignedIssueFromSession, trustedSessionKey,
   GitHubAppClient,
@@ -68,6 +69,7 @@ context.entry.register({
     else tools.set(tool.name, tool);
   },
   registerGatewayMethod: (name, handler, options) => methods.set(name, { handler, options }),
+  on() {},
   registerService() {},
   logger: { info() {}, error() {} },
 });

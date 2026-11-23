@@ -226,6 +226,12 @@ write intent/delivery state in task metadata; failed input delivery stays waitin
 and uncertain writes are not replayed. This is application-owned thread metadata,
 not native inbound conversation routing. See
 [thread delivery evidence](evidence/wbs4.5-slack-task-thread-qualification.md).
+The native before_dispatch reply adapter now matches host-authenticated Slack
+identity to the retained task, rechecks the current question, and durably admits
+one reply before returning to Slack. Other replies cannot fall through to an
+ordinary model turn while this adapter owns Slack input. This is fixture-qualified;
+native channel admission remains disabled pending live ingress qualification.
+See [reply ingress evidence](evidence/wbs4.5-slack-task-reply-qualification.md).
 See [waiting boundary evidence](evidence/wbs4.5-coding-waiting-qualification.md).
 
 **Small batch 6 — Controller task authorization:** Extend the Controller's

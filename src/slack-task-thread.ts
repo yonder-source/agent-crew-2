@@ -4,6 +4,7 @@ export type SlackTaskThread = {
   agentId: string; channelId: string; userIds: string[];
   status: "creating" | "ready" | "failed";
   threadTs?: string;
+  acceptedReplyTs?: string;
   input?: { runId: string; status: "sending" | "sent" | "failed"; messageTs?: string };
 };
 
@@ -16,6 +17,7 @@ export function isSlackTaskThread(value: unknown): value is SlackTaskThread {
       !Array.isArray(value.userIds) || value.userIds.length === 0 || value.userIds.length > 100 ||
       !value.userIds.every((id: unknown) => typeof id === "string" && /^[UW][A-Z0-9]+$/.test(id)) ||
       !["creating", "ready", "failed"].includes(String(value.status)) ||
+      (value.acceptedReplyTs !== undefined && !timestamp(value.acceptedReplyTs)) ||
       (value.threadTs !== undefined && !timestamp(value.threadTs)) ||
       (value.status === "ready" && !timestamp(value.threadTs))) return false;
   if (value.input === undefined) return true;

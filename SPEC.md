@@ -165,9 +165,18 @@ plain-text reply in the retained thread; its run ID and delivery state are
 persisted. Root creation and input-request sends record an intent before the
 write. Failed or unacknowledged root creation blocks coding for inspection;
 failed input delivery leaves the task waiting. Lost metadata acknowledgements
-retain the sending marker and never trigger automatic replay. Native inbound
-conversation binding, authorized Slack reply ingress and provider token accounting
-still need integration.
+retain the sending marker and never trigger automatic replay. A native `before_dispatch` claim handler routes authenticated Slack thread
+replies through the Controller resume seam. It derives user, account, channel,
+thread and message identity from host context, matches exactly one retained task,
+and rechecks authorization when dispatch is serialized. Only a successfully sent
+question can accept a newer reply. Persist the accepted message timestamp with
+the starting state before execution; repeated events cannot resume again. The
+handler returns after durable admission, keeping later replies out of the native
+ordinary model queue. Other Slack input is claimed without executing an agent
+when coding Slack settings are present. Replies predating the current native
+Slack connection must be resent. This ingress path is fixture-qualified; keep
+native channel admission disabled until live ingress qualification. Provider
+token accounting still needs integration.
 Each coding task uses a bound thread. Status updates and requests for human input
 are distinct operations: only a confirmed transition to waiting stops the task's
 active-time clock. Accept the first authorized reply in the bound thread and
