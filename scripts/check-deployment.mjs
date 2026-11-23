@@ -84,6 +84,7 @@ function validate(model, settings, metadata = pkg) {
   assert.ok(dockerfile.includes("COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker"),
     "Gateway Docker CLI is missing");
   assert.ok(dockerfile.includes(`@openclaw/lobster@${version}`), "Lobster version mismatch");
+  assert.ok(dockerfile.includes(`@openclaw/slack@${version}`), "Slack version mismatch");
   assert.ok(dockerfile.includes(`npm pack openclaw@${version} `), "SDK declaration version mismatch");
   assert.equal(gateway.image, `agent-crew-openclaw:${version}`);
   assert.equal(model.services.checks.image, `agent-crew-openclaw-checks:${version}`);

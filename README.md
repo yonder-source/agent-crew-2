@@ -190,9 +190,26 @@ Only the Gateway receives these mounts.
 The setup page's **Slack credentials** area checks readability and expected
 token type, with a button to repeat the check. Values and raw filesystem errors
 are never returned. `Available` means file readiness, not successful Slack
-authentication. Slack plugin setup, channel/user settings and the Socket Mode
-connection are a subsequent batch; mounting these files alone does not enable
-Slack ingress. The optional overlay requires both files to exist.
+authentication. The native transport setup below separately enables the
+Socket Mode connection. Applying saved channel/user routing and task interaction
+remain later work. The optional overlay requires both files to exist.
+
+### Native Slack Socket Mode connection
+
+The Gateway image includes `@openclaw/slack@2026.11.3`. To enable its transport,
+append `slack` to the existing `plugins.allow` and
+`/opt/agent-crew-slack/node_modules/@openclaw/slack` to `plugins.load.paths`,
+preserving the other entries. The
+[`slack.socket.patch.example.json`](infra/local-dev/openclaw/slack.socket.patch.example.json)
+fragment supplies plugin enablement, file SecretRefs and Socket Mode settings.
+Merge it into the existing configuration and validate with the pinned runtime
+before applying; use the Slack Compose overlay when recreating the Gateway.
+
+The fragment disables generic DM/channel handling, slash commands and join
+introductions. The transport can connect while task-bound reply handling is
+still being implemented. Native `channels.status` reports the account's
+`running`, `connected` and probe result; file availability alone does not establish
+connection. See [native connection evidence](docs/restart/evidence/wbs4.5-slack-socket-qualification.md).
 
 ## Local coding workflow
 

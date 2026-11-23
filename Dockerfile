@@ -9,6 +9,8 @@ USER root
 RUN npm install --prefix /opt/agent-crew-lobster --omit=dev --ignore-scripts @openclaw/lobster@2026.11.3
 COPY scripts/patch-openclaw-startup.mjs /opt/agent-crew-patches/patch-openclaw-startup.mjs
 RUN node /opt/agent-crew-patches/patch-openclaw-startup.mjs
+RUN npm install --prefix /opt/agent-crew-slack --omit=dev --legacy-peer-deps --ignore-scripts --no-audit --no-fund @openclaw/slack@2026.11.3 \
+    && ln -s /app /opt/agent-crew-slack/node_modules/openclaw
 USER node
 
 FROM base AS build

@@ -124,6 +124,10 @@ The optional local Slack overlay mounts separate bot and app token files only
 on the Gateway. The operator setup page reports each file as available, missing,
 invalid or unavailable; available means readable with the expected token type,
 not authenticated or connected to Slack. Status reads require operator admin.
+The Gateway image includes the matching native Slack plugin. Socket Mode reads
+its bot and app tokens through file SecretRefs and exposes connection health
+through native channel status. Keep generic DM/channel replies, slash commands
+and join introductions disabled until task-bound ingress is implemented.
 Each coding task uses a bound thread. Status updates and requests for human input
 are distinct operations: only a confirmed transition to waiting stops the task's
 active-time clock. Accept the first authorized reply in the bound thread and

@@ -202,9 +202,11 @@ worktree context summary; add one only if a concrete gap is found.
 Credential readiness is a separate small batch: optional `compose.slack.yaml`
 mounts `.local/secrets/slack-bot-token` and `.local/secrets/slack-app-token`
 only on the Gateway. The setup page exposes admin-only file/type availability
-without token values. This establishes local provisioning readiness; native
-Slack configuration, Socket Mode connection and task interaction still need
-implementation and live qualification. See
+without token values. Native plugin packaging and a persistent Socket Mode
+connection are qualified separately in
+[native Slack connection evidence](evidence/wbs4.5-slack-socket-qualification.md).
+Applying saved channel/user settings through the setup UI and task-bound
+interaction remain outstanding. See
 [credential readiness evidence](evidence/wbs4.5-slack-credential-readiness.md).
 
 **Small batch 6 — Controller task authorization:** Extend the Controller's
