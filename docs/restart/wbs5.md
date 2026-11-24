@@ -55,7 +55,12 @@ base; do not require local and remote `main` to remain identical at publication.
 Inspect any existing remote task branch before writing. An exact matching head
 can be treated as already present after verification. An incompatible head blocks
 publication; never force-push, merge or rewrite history to make it match.
-The controller records each attempt in `publication.pushOperations`.
+When the branch is absent, create it atomically with an empty-expectation lease
+requiring the ref to remain absent, so a competing create is not fast-forwarded
+and an existing ref cannot be updated. Push to an explicit repository URL
+derived from Controller configuration; do not consume an independently
+configured `remote.origin.pushurl`. The controller records each attempt in
+`publication.pushOperations`.
 
 Persist a distinct push operation ID, intended repository/ref/head and `writing`
 marker before dispatching the external write. Confirm the remote outcome before

@@ -418,7 +418,11 @@ binding, clean state, exact branch/head and recorded base ancestry. It does not
 accept caller-supplied authorization, expose a coding-agent publication tool,
 create another commit or rename the native managed branch. An incompatible
 remote task branch blocks publication; never force-push. Remote `main` advancing
-alone does not invalidate the recorded task base.
+alone does not invalidate the recorded task base. Create a missing remote task
+ref atomically with an empty-expectation lease that requires it to remain
+absent; this cannot update an existing ref, and a competing creation cannot be
+fast-forwarded. Push to an explicit URL derived from the configured repository
+rather than an arbitrary `remote.origin.pushurl`.
 The Controller retains the delivery only after the coding workflow has returned
 and the native run is confirmed stopped. A separate trusted Lobster publication
 workflow then invokes publication. Retain the native coding session ID and

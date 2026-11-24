@@ -396,10 +396,14 @@ export async function pushTaskBranch(options: {
     throw new Error("Task branch push binding is invalid.");
   }
   try {
+    const ref = `refs/heads/${options.branch}`;
     await authenticatedTaskGit({
       ...options,
       timeoutMs: 120_000,
-      args: ["push", "--porcelain", "origin", `${options.expectedHead}:refs/heads/${options.branch}`],
+      args: [
+        "push", "--porcelain", `--force-with-lease=${ref}:`,
+        sourceUrl(options.repository), `${options.expectedHead}:${ref}`,
+      ],
     });
   } catch (error) {
     let remoteHead: string | undefined;

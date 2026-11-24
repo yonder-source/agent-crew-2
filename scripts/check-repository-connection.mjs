@@ -210,6 +210,8 @@ try {
   await writeFile(wrapper, `#!${process.execPath}\nconst {spawnSync}=require('node:child_process');
 const args=process.argv.slice(2);const f=args.indexOf('fetch');
 if(f>=0){const o=args.indexOf('origin',f);if(o>=0)args[o]=${JSON.stringify(remote)};}
+const u=args.indexOf('https://github.com/owner/repo.git');
+if(u>=0)args[u]=${JSON.stringify(remote)};
 const r=spawnSync('/usr/bin/git',args,{stdio:'inherit'});process.exit(r.status??1);\n`);
   await chmod(wrapper, 0o700);
   process.env.PATH = `${bin}:${originalPath ?? "/usr/bin:/bin"}`;
@@ -303,7 +305,25 @@ const r=spawnSync('/usr/bin/git',args,{stdio:'inherit'});process.exit(r.status??
     repository: "owner/repo", token: "fixture-token", workspacePath,
     branch: options.branch, expectedHead: taskHead,
   };
+  const wrongRemote = join(taskRoot, "wrong-remote.git");
+  gitFixture(taskRoot, "init", "--bare", "--initial-branch=main", wrongRemote);
+  gitFixture(workspacePath, "remote", "set-url", "--push", "origin", wrongRemote);
   assert.equal(await inspectTaskRemoteHead(publication), undefined);
+  await pushTaskBranch(publication);
+  assert.equal(await inspectTaskRemoteHead(publication), taskHead,
+    "Push must bypass any independently configured origin pushurl");
+  const wrongRemoteHead = spawnSync("/usr/bin/git", [
+    "--git-dir", wrongRemote, "rev-parse", "--verify", `refs/heads/${options.branch}`,
+  ], { encoding: "utf8" });
+  assert.notEqual(wrongRemoteHead.status, 0, "The origin pushurl must receive no publication write");
+  gitFixture(seed, "push", remote, `:refs/heads/${options.branch}`);
+  assert.equal(await inspectTaskRemoteHead(publication), undefined);
+  gitFixture(seed, "push", remote, `${baseCommit}:refs/heads/${options.branch}`);
+  await assert.rejects(pushTaskBranch(publication), (error) =>
+    error instanceof TaskPushError && error.code === "REMOTE_BRANCH_MISMATCH");
+  assert.equal(await inspectTaskRemoteHead(publication), baseCommit,
+    "A competing ref creation must not be fast-forwarded");
+  gitFixture(seed, "push", remote, `:refs/heads/${options.branch}`);
   await pushTaskBranch(publication);
   assert.equal(await inspectTaskRemoteHead(publication), taskHead);
   gitFixture(seed, "switch", "-c", "competing-publication", baseCommit);

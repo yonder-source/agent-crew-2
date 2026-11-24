@@ -157,6 +157,7 @@ try {
       ["scripts/check-dispatcher.mjs", "execFile"],
       ["scripts/check-repository-connection.mjs", "spawnSync"],
       ["src/repository-clone.ts", "execFile"],
+      ["scripts/publication-call.mjs", "spawnSync"],
     ].map(([file, name]) => [file,
       `import { ${name} } from "node:child_process"; console.log(${name});`,
       'import { exec as run } from "node:child_process"; console.log(run);', "no-restricted-imports"]),
