@@ -208,14 +208,19 @@ try {
   const expected = gitFixture(seed, "rev-parse", "HEAD");
   const bin = join(taskRoot, "bin");
   await mkdir(bin);
+  const gitGlobalConfig = join(bin, "global.gitconfig");
+  await writeFile(gitGlobalConfig,
+    `[url "${remote}"]\n\tinsteadOf = https://github.com/owner/repo.git\n\tpushInsteadOf = https://github.com/owner/repo.git\n`);
   const wrapper = join(bin, "git");
   await writeFile(wrapper, `#!${process.execPath}\nconst {spawnSync}=require('node:child_process');
 const args=process.argv.slice(2);const f=args.indexOf('fetch');
 if(f>=0){const o=args.indexOf('origin',f);if(o>=0)args[o]=${JSON.stringify(remote)};}
-const u=args.indexOf('https://github.com/owner/repo.git');
-const c=args.indexOf('-C');const cwd=c>=0?args[c+1]:'';
-if(u>=0&&cwd.includes('agent-crew-publication-'))args[u]=${JSON.stringify(remote)};
-const r=spawnSync('/usr/bin/git',args,{stdio:'inherit'});process.exit(r.status??1);\n`);
+const inspectOrigin=args.includes('remote')&&args.includes('get-url')&&args.includes('origin');
+const r=spawnSync('/usr/bin/git',args,{stdio:'inherit',env:{
+  ...process.env,
+  GIT_CONFIG_NOSYSTEM:'1',
+  GIT_CONFIG_GLOBAL:inspectOrigin?'/dev/null':${JSON.stringify(gitGlobalConfig)},
+}});process.exit(r.status??1);\n`);
   await chmod(wrapper, 0o700);
   process.env.PATH = `${bin}:${originalPath ?? "/usr/bin:/bin"}`;
   const options = { repository: "owner/repo", repositoryPath: source,
