@@ -1,6 +1,6 @@
 import { authorizesSlackTaskReply, isReplyAfterSlackConnection, parseSlackTaskReply } from "../dist/slack-task-reply.js";
 import { isSlackTaskThread } from "../dist/slack-task-thread.js";
-import { TaskBaseError } from "../dist/repository-clone.js";
+import { TaskBaseError, TaskPushError } from "../dist/repository-clone.js";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -47,6 +47,9 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
   let codingText = "Changed README; validation passed";
   let codingValidation = { status: "ok", checks: [{ command: "npm test", outcome: "ok", exitCode: 0 }] };
   let deliveryFailure = false;
+  let publicationVerificationFailure = false;
+  let remoteTaskHead;
+  let taskPushFailure;
   let failConfigPatch = false;
   let inventory = { sessions: [] };
   const setupDraft = { githubAppId: "123", repository: "owner/repo", installationId: "17", repositoryPath,
@@ -78,12 +81,29 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
       if (deliveryFailure) throw new Error("Dirty or mismatched worktree");
       return "b".repeat(40);
     },
+    verifyTaskPublication: async (options) => {
+      calls.push({ method: "verify-publication", params: options });
+      if (publicationVerificationFailure) throw new Error("Publication worktree verification failed");
+    },
+    inspectTaskRemoteHead: async (options) => {
+      calls.push({ method: "inspect-remote-branch", params: options });
+      return remoteTaskHead;
+    },
+    pushTaskBranch: async (options) => {
+      const retained = session.pluginExtensions[0].value.publication.pushOperations.at(-1);
+      assert.equal(retained.status, "writing", "A durable writing marker must precede the Git push");
+      calls.push({ method: "push-task-branch", params: options });
+      if (taskPushFailure) throw new TaskPushError(taskPushFailure, "Fixture push failure");
+      remoteTaskHead = options.expectedHead;
+    },
+    TaskPushError,
     process: { env: { AGENT_CREW_GATEWAY_TOKEN: "test" } },
     assignedIssueFromSession, trustedSessionKey,
     connectionConfig,
     GitHubAppError,
     GitHubAppClient: class {
       async installationTokenForRepository() { return "fixture-token"; }
+      async publicationTokenForRepository() { return "fixture-publication-token"; }
       async repositoryAccess() { return { permissions: { contents: "write", issues: "write", pull_requests: "write" } }; }
     },
     validateCheckout: async () => ({ id: "checkout", status: "passed", message: "Fixture remote matches" }),
@@ -207,6 +227,10 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
     setValidation(value) { codingValidation = value; },
     setUsage(value) { codingUsage = value; },
     failDelivery() { deliveryFailure = true; },
+    failPublicationVerification() { publicationVerificationFailure = true; },
+    setRemoteTaskHead(value) { remoteTaskHead = value; },
+    failTaskPush(code) { taskPushFailure = code; },
+    allowTaskPush() { taskPushFailure = undefined; },
     requestInput(value, active = false) { requestInput = value; hasActiveRun = active; },
     setStoppedRun(value) { stoppedRunId = value; },
     setRunId(value) { runId = value; stoppedRunId = value; },
@@ -234,7 +258,7 @@ const acceptedPublication = await success.method("agent-crew.publication.accept"
   sessionKey: first.value.job.sessionKey, jobId: "caller-supplied-job", headCommit: "c".repeat(40),
 });
 assert.equal(acceptedPublication.ok, true);
-assert.equal(acceptedPublication.value.status, "accepted");
+assert.equal(acceptedPublication.value.status, "confirmed");
 assert.deepEqual(JSON.parse(JSON.stringify(acceptedPublication.value.publication)), {
   repository: "owner/repo",
   issueNumber: 7,
@@ -247,6 +271,15 @@ assert.deepEqual(JSON.parse(JSON.stringify(acceptedPublication.value.publication
   headCommit: "b".repeat(40),
   validation: first.value.job.codingDelivery.validation,
 });
+assert.equal(acceptedPublication.value.push.status, "confirmed");
+assert.equal(acceptedPublication.value.push.repository, "owner/repo");
+assert.equal(acceptedPublication.value.push.ref, `refs/heads/${branch}`);
+assert.equal(acceptedPublication.value.push.headCommit, "b".repeat(40));
+assert.equal(success.calls.find(call => call.method === "verify-publication")
+  .params.expectedHead, "b".repeat(40));
+assert.equal(success.calls.filter(call => call.method === "push-task-branch").length, 1);
+assert.equal(success.calls.find(call => call.method === "push-task-branch")
+  .params.token, "fixture-token");
 assert.equal((await success.method("agent-crew.publication.accept", {
   sessionKey: "agent:coding:other",
 })).ok, false);
@@ -279,6 +312,11 @@ assert.match(conflictPrompt, /untrustedIssue/);
 assert.match(conflictPrompt, /Do not commit, push, publish/);
 assert.equal((await success.method("agent-crew.dispatch", issue)).value.job.jobId, first.value.job.jobId);
 assert.equal(success.calls.filter((call) => call.method === "tools.invoke").length, 1);
+assert.equal((await success.method("agent-crew.publication.accept", {
+  sessionKey: first.value.job.sessionKey,
+})).value.status, "confirmed");
+assert.equal(success.calls.filter(call => call.method === "push-task-branch").length, 1,
+  "Repeated publication must not replay a confirmed push");
 
 const failed = harness();
 failed.setCoding("error", "Coding failed");
@@ -314,6 +352,82 @@ assert.equal((await dirty.method("agent-crew.publication.accept", {
   sessionKey: dirtyJob.sessionKey,
 })).ok, false);
 assert.deepEqual((await dirty.status()).details.job.codingDelivery, dirtyJob.codingDelivery);
+
+const blockedPublication = harness();
+const blockedJob = (await blockedPublication.method("agent-crew.dispatch", issue)).value.job;
+blockedPublication.failPublicationVerification();
+const blockedPush = await blockedPublication.method("agent-crew.publication.accept", {
+  sessionKey: blockedJob.sessionKey,
+});
+assert.equal(blockedPush.value.status, "needs-inspection");
+assert.match(blockedPush.value.push.reason, /Worktree/);
+assert.equal(blockedPublication.calls.filter(call => call.method === "push-task-branch").length, 0);
+
+const matchingRemote = harness();
+const matchingJob = (await matchingRemote.method("agent-crew.dispatch", issue)).value.job;
+matchingRemote.setRemoteTaskHead("b".repeat(40));
+const alreadyPresent = await matchingRemote.method("agent-crew.publication.accept", {
+  sessionKey: matchingJob.sessionKey,
+});
+assert.equal(alreadyPresent.value.status, "confirmed");
+assert.equal(matchingRemote.calls.filter(call => call.method === "push-task-branch").length, 0,
+  "An exact existing remote head is confirmed without another push");
+
+const incompatibleRemote = harness();
+const incompatibleJob = (await incompatibleRemote.method("agent-crew.dispatch", issue)).value.job;
+incompatibleRemote.setRemoteTaskHead("c".repeat(40));
+const incompatiblePush = await incompatibleRemote.method("agent-crew.publication.accept", {
+  sessionKey: incompatibleJob.sessionKey,
+});
+assert.equal(incompatiblePush.value.status, "needs-inspection");
+assert.match(incompatiblePush.value.push.reason, /incompatible head/);
+assert.equal(incompatibleRemote.calls.filter(call => call.method === "push-task-branch").length, 0);
+
+const uncertainPublication = harness();
+const uncertainJob = (await uncertainPublication.method("agent-crew.dispatch", issue)).value.job;
+uncertainPublication.failTaskPush("PUSH_UNCERTAIN");
+const uncertainPush = await uncertainPublication.method("agent-crew.publication.accept", {
+  sessionKey: uncertainJob.sessionKey,
+});
+assert.equal(uncertainPush.value.status, "needs-inspection");
+assert.equal(uncertainPush.value.push.status, "needs-inspection");
+assert.equal((await uncertainPublication.method("agent-crew.publication.accept", {
+  sessionKey: uncertainJob.sessionKey,
+})).value.status, "needs-inspection");
+assert.equal(uncertainPublication.calls.filter(call => call.method === "push-task-branch").length, 1,
+  "Uncertain pushes must not replay automatically");
+const approvedPushRetry = await uncertainPublication.method("agent-crew.resolve", {
+  ...issue, target: "publication-push", decision: "retry", note: "Remote branch inspected and push may be retried",
+});
+assert.equal(approvedPushRetry.ok, true);
+assert.equal(approvedPushRetry.value.job.publication.pushOperations.at(-1).status, "retry-approved");
+uncertainPublication.allowTaskPush();
+const retriedPush = await uncertainPublication.method("agent-crew.publication.accept", {
+  sessionKey: uncertainJob.sessionKey,
+});
+assert.equal(retriedPush.value.status, "confirmed");
+assert.equal(retriedPush.value.push.operationId !== uncertainPush.value.push.operationId, true);
+assert.equal(uncertainPublication.session().pluginExtensions[0].value.publication.pushOperations.length, 2);
+
+const rejectedPublication = harness();
+const rejectedJob = (await rejectedPublication.method("agent-crew.dispatch", issue)).value.job;
+rejectedPublication.failTaskPush("PUSH_REJECTED");
+const rejectedPush = await rejectedPublication.method("agent-crew.publication.accept", {
+  sessionKey: rejectedJob.sessionKey,
+});
+assert.equal(rejectedPush.value.status, "failed");
+
+const interruptedPushSnapshot = structuredClone(success.session());
+const interruptedPush = interruptedPushSnapshot.pluginExtensions[0].value.publication.pushOperations.at(-1);
+interruptedPush.status = "writing";
+interruptedPush.reason = undefined;
+const interruptedPushRestart = harness(interruptedPushSnapshot);
+const interruptedResult = await interruptedPushRestart.method("agent-crew.publication.accept", {
+  sessionKey: first.value.job.sessionKey,
+});
+assert.equal(interruptedResult.value.status, "needs-inspection");
+assert.match(interruptedResult.value.push.reason, /Gateway stopped/);
+assert.equal(interruptedPushRestart.calls.filter(call => call.method === "push-task-branch").length, 0);
 
 const orphan = harness({
   sessionRoot: workspacePath, sessionId: "native-session-7",

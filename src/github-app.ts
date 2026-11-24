@@ -135,6 +135,11 @@ export class GitHubAppClient {
     return this.createInstallationToken(selected.installation.id, selected.jwt, selected.repository.id);
   }
 
+  async publicationTokenForRepository(appId: unknown, installationId: unknown, repository: unknown): Promise<string> {
+    const selected = await this.resolveRepository(appId, installationId, repository);
+    return this.createInstallationToken(selected.installation.id, selected.jwt, selected.repository.id, "contents-write");
+  }
+
   async issueTokenForRepository(appId: unknown, installationId: unknown, repository: unknown): Promise<string> {
     const selected = await this.resolveRepository(appId, installationId, repository);
     return this.createInstallationToken(selected.installation.id, selected.jwt, selected.repository.id, "issues");
@@ -190,8 +195,15 @@ export class GitHubAppClient {
     }
   }
 
-  private async createInstallationToken(installationId: number, jwt: string, repositoryId?: number, access: "contents" | "issues" = "contents"): Promise<string> {
-    const permissions = access === "issues" ? { issues: "write" } : { contents: "read" };
+  private async createInstallationToken(
+    installationId: number,
+    jwt: string,
+    repositoryId?: number,
+    access: "contents" | "contents-write" | "issues" = "contents",
+  ): Promise<string> {
+    const permissions = access === "issues"
+      ? { issues: "write" }
+      : { contents: access === "contents-write" ? "write" : "read" };
     const body = repositoryId === undefined
       ? { permissions }
       : { repository_ids: [repositoryId], permissions };

@@ -51,6 +51,7 @@ base; do not require local and remote `main` to remain identical at publication.
 Inspect any existing remote task branch before writing. An exact matching head
 can be treated as already present after verification. An incompatible head blocks
 publication; never force-push, merge or rewrite history to make it match.
+The controller records each attempt in `publication.pushOperations`.
 
 Persist a distinct push operation ID, intended repository/ref/head and `writing`
 marker before dispatching the external write. Confirm the remote outcome before

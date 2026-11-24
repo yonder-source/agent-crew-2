@@ -9,7 +9,10 @@ import { parseConfig } from "./config.mjs";
 import { IssueDiscovery } from "./discovery.js";
 import { GitHubIssueError, OctokitGitHubIssueProvider } from "./github-issues.js";
 import { GitHubAppClient, GitHubAppError } from "./github-app.js";
-import { cloneRepository, prepareTaskBase, verifyTaskWorkspace, commitTaskDelivery, TaskBaseError } from "./repository-clone.js";
+import {
+  cloneRepository, prepareTaskBase, verifyTaskWorkspace, commitTaskDelivery, verifyTaskPublication,
+  inspectTaskRemoteHead, pushTaskBranch, TaskBaseError, TaskPushError,
+} from "./repository-clone.js";
 import { codingPrompt } from "./coding-prompt.js";
 import { normalizeCodingValidation, isCodingDelivery, normalizeCodingUsage, isCodingUsage, addCodingUsage, parseTokenBudget, type CodingUsage, type CodingDelivery } from "./coding-result.js";
 import { validateCheckout, type ConnectionCheck } from "./repository-validation.js";
@@ -66,6 +69,16 @@ function isWorkflowStatus(value: unknown): value is WorkflowStatus {
 }
 
 type Issue = { repository: string; number: number };
+type PublicationPushOperation = {
+  operationId: string;
+  status: "writing" | "needs-inspection" | "confirmed" | "retry-approved" | "failed" | "abandoned";
+  repository: string;
+  ref: string;
+  headCommit: string;
+  updatedAt: string;
+  reason?: string;
+  decision?: string;
+};
 type Job = Issue & {
   jobId: string;
   sessionKey: string;
@@ -98,6 +111,9 @@ type Job = Issue & {
     bodyHash: string;
     updatedAt: string;
     decision?: string;
+  };
+  publication?: {
+    pushOperations: PublicationPushOperation[];
   };
 };
 
@@ -147,13 +163,25 @@ function isJob(value: unknown): value is Job {
       (value.codingDelivery !== undefined && !isCodingDelivery(value.codingDelivery)) ||
       (value.error !== undefined && typeof value.error !== "string") ||
       (value.decision !== undefined && typeof value.decision !== "string")) return false;
-  if (value.issueUpdate === undefined) return true;
-  const update = value.issueUpdate;
-  return isRecord(update) &&
-    ["writing", "needs-inspection", "retry-approved", "confirmed", "abandoned"].includes(String(update.status)) &&
-    typeof update.operationId === "string" && typeof update.bodyHash === "string" &&
-    typeof update.updatedAt === "string" &&
-    (update.decision === undefined || typeof update.decision === "string");
+  if (value.issueUpdate !== undefined) {
+    const update = value.issueUpdate;
+    if (!isRecord(update) ||
+        !["writing", "needs-inspection", "retry-approved", "confirmed", "abandoned"].includes(String(update.status)) ||
+        typeof update.operationId !== "string" || typeof update.bodyHash !== "string" ||
+        typeof update.updatedAt !== "string" ||
+        (update.decision !== undefined && typeof update.decision !== "string")) return false;
+  }
+  if (value.publication === undefined) return true;
+  if (!isRecord(value.publication) || !Array.isArray(value.publication.pushOperations) ||
+      value.publication.pushOperations.length === 0 || value.publication.pushOperations.length > 100) return false;
+  return value.publication.pushOperations.every((operation) => isRecord(operation) &&
+    ["writing", "needs-inspection", "confirmed", "retry-approved", "failed", "abandoned"].includes(String(operation.status)) &&
+    typeof operation.operationId === "string" && typeof operation.repository === "string" &&
+    typeof operation.ref === "string" && /^refs\/heads\/openclaw\/agent-crew-issue-[1-9][0-9]*$/.test(operation.ref) &&
+    typeof operation.headCommit === "string" && /^[a-f0-9]{40,64}$/.test(operation.headCommit) &&
+    typeof operation.updatedAt === "string" &&
+    (operation.reason === undefined || typeof operation.reason === "string") &&
+    (operation.decision === undefined || typeof operation.decision === "string"));
 }
 
 // Explicit output boundary: continuation credentials stay in session metadata.
@@ -180,6 +208,7 @@ function publicJob(job: Job) {
     ...(job.error !== undefined ? { error: "Workflow outcome requires inspection" } : {}),
     ...(job.decision !== undefined ? { decision: job.decision } : {}),
     ...(job.issueUpdate !== undefined ? { issueUpdate: job.issueUpdate } : {}),
+    ...(job.publication !== undefined ? { publication: job.publication } : {}),
   };
 }
 
@@ -219,7 +248,9 @@ export default definePluginEntry({
     let discovery: IssueDiscovery | undefined;
     let issueUpdateQueue = Promise.resolve();
     let metadataQueue = Promise.resolve();
+    let publicationQueue = Promise.resolve();
     const activeIssueUpdates = new Set<string>();
+    const activePublicationPushes = new Set<string>();
     api.session.state.registerSessionExtension({ namespace: NAMESPACE, description: "Issue admission and workflow status" });
     // Explicit operator credential: use the authenticated public API, not the
     // trusted-plugin-only in-process gateway.request capability.
@@ -279,6 +310,12 @@ export default definePluginEntry({
       return result;
     };
 
+    const serializePublication = <T>(operation: () => Promise<T>): Promise<T> => {
+      const result = publicationQueue.then(operation, operation);
+      publicationQueue = result.then(() => undefined, () => undefined);
+      return result;
+    };
+
     const patchJob = (issue: Issue, update: (job: Job) => Job): Promise<Job> => {
       const result = metadataQueue.then(async () => {
         const current = await readJob(issue);
@@ -328,13 +365,38 @@ export default definePluginEntry({
           typeof job.issueUpdate.updatedAt !== "string")) {
         throw new Error("Invalid issue update metadata; operator inspection required");
       }
+      const pushOperations = job.publication?.pushOperations;
+      if (pushOperations !== undefined && (
+          pushOperations.length === 0 ||
+          pushOperations.some((operation) => operation.repository !== job.repository ||
+            operation.ref !== `refs/heads/${job.workspaceBranch}` ||
+            job.codingDelivery?.status !== "ready" ||
+            operation.headCommit !== job.codingDelivery.headCommit))) {
+        throw new Error("Invalid publication metadata; operator inspection required");
+      }
       // Read-only normalization avoids a status request racing an operator reset.
+      const currentPush = pushOperations?.at(-1);
       return {
         ...job,
         ...(job.status === "starting" && (job.bootId !== bootId || (job.jobId !== startingJobId && !admittingSessions.has(job.sessionKey)))
           ? { status: "needs-inspection" as const } : {}),
         ...(job.issueUpdate?.status === "writing" && !activeIssueUpdates.has(job.issueUpdate.operationId)
           ? { issueUpdate: { ...job.issueUpdate, status: "needs-inspection" as const } }
+          : {}),
+        ...(currentPush?.status === "writing" && !activePublicationPushes.has(currentPush.operationId)
+          ? {
+            publication: {
+              pushOperations: [
+                ...pushOperations!.slice(0, -1),
+                {
+                  ...currentPush,
+                  status: "needs-inspection" as const,
+                  reason: "Push was unfinished when the Gateway stopped; inspect the remote branch.",
+                  updatedAt: new Date().toISOString(),
+                },
+              ],
+            },
+          }
           : {}),
       };
     };
@@ -354,6 +416,13 @@ export default definePluginEntry({
       if (!job.workspacePath || !job.workspaceBranch || !job.baseCommit || !job.codingRunId) {
         throw new Error("Retained task binding is incomplete for publication.");
       }
+      if (job.workspaceBranch !== `openclaw/agent-crew-issue-${job.number}` ||
+          !config.coding || !config.github ||
+          job.repository !== config.github.repository ||
+          job.connection?.agentId !== config.coding.agentId ||
+          job.connection.repositoryPath !== config.coding.repositoryPath) {
+        throw new Error("Publication task binding no longer matches the active repository connection.");
+      }
       return {
         repository: job.repository,
         issueNumber: job.number,
@@ -367,6 +436,20 @@ export default definePluginEntry({
         validation: job.codingDelivery.validation,
       };
     };
+    const latestPublicationPush = (job: Job): PublicationPushOperation | undefined =>
+      job.publication?.pushOperations.at(-1);
+    const updatePublicationPush = async (
+      issue: Issue,
+      operation: PublicationPushOperation,
+    ): Promise<Job> => patchJob(issue, (current) => {
+      const operations = current.publication?.pushOperations ?? [];
+      const existing = operations.findIndex((candidate) => candidate.operationId === operation.operationId);
+      const pushOperations = existing < 0
+        ? [...operations, operation]
+        : operations.map((candidate) => candidate.operationId === operation.operationId ? operation : candidate);
+      if (pushOperations.length > 100) throw new Error("Publication operation history requires inspection.");
+      return { ...current, publication: { pushOperations }, updatedAt: new Date().toISOString() };
+    });
 
     const assertNoActiveCodingTasks = async (approvedRetryJobId?: string, resuming = false): Promise<void> => {
       let approvedRetryFound = false;
@@ -408,11 +491,13 @@ export default definePluginEntry({
         }
         const job = jobValue;
         const approvedRetry = (job.status === "retry-approved" || (resuming && job.status === "waiting")) && job.jobId === approvedRetryJobId;
+        const publicationPush = latestPublicationPush(job);
         if (approvedRetry) approvedRetryFound = true;
         const blockingStatuses = resuming ? ["starting", "active", "needs-inspection", "retry-approved"]
           : ["starting", "active", "waiting", "needs-inspection", "retry-approved"];
         if ((!approvedRetry && blockingStatuses.includes(job.status)) ||
-            (job.issueUpdate !== undefined && ["writing", "needs-inspection", "retry-approved", "abandoned"].includes(job.issueUpdate.status))) {
+            (job.issueUpdate !== undefined && ["writing", "needs-inspection", "retry-approved", "abandoned"].includes(job.issueUpdate.status)) ||
+            (publicationPush !== undefined && ["writing", "needs-inspection", "retry-approved", "abandoned"].includes(publicationPush.status))) {
           throw new Error("An Agent Crew coding task is active or uncertain; repository checkout is blocked.");
         }
       }
@@ -1057,22 +1142,174 @@ export default definePluginEntry({
         if (!sessionAccessAuthority) {
           throw new Error("Publication acceptance requires an authenticated task session.");
         }
-        sessionAccessAuthority.assertCurrent();
-        const target = sessionAccessAuthority.target;
-        const response: unknown = await call("sessions.describe", { key: target.sessionKey });
-        const session = isRecord(response) ? response.session : undefined;
-        const extensions = isRecord(session) ? session.pluginExtensions : undefined;
-        if (!Array.isArray(extensions)) throw new Error("Publication task session metadata is unavailable.");
-        const matches = extensions.filter((item: unknown) => isRecord(item) &&
-          item.pluginId === "agent-crew" && item.namespace === NAMESPACE);
-        const retained: unknown = matches.length === 1 && isRecord(matches[0]) ? matches[0].value : undefined;
-        sessionAccessAuthority.assertCurrent();
-        if (!isJob(retained) || retained.sessionKey !== target.sessionKey ||
-            retained.sessionKey !== issueSessionKey(retained) ||
-            retained.repository !== config.github?.repository) {
-          throw new Error("Publication request does not match the retained task binding.");
-        }
-        respond(true, { status: "accepted", publication: publicationAcceptance(retained) });
+        await serializePublication(async () => {
+          sessionAccessAuthority.assertCurrent();
+          const target = sessionAccessAuthority.target;
+          const response: unknown = await call("sessions.describe", { key: target.sessionKey });
+          const session = isRecord(response) ? response.session : undefined;
+          const extensions = isRecord(session) ? session.pluginExtensions : undefined;
+          if (!Array.isArray(extensions)) throw new Error("Publication task session metadata is unavailable.");
+          const matches = extensions.filter((item: unknown) => isRecord(item) &&
+            item.pluginId === "agent-crew" && item.namespace === NAMESPACE);
+          const retained: unknown = matches.length === 1 && isRecord(matches[0]) ? matches[0].value : undefined;
+          sessionAccessAuthority.assertCurrent();
+          if (!isJob(retained) || retained.sessionKey !== target.sessionKey ||
+              retained.sessionKey !== issueSessionKey(retained) ||
+              retained.repository !== config.github?.repository) {
+            throw new Error("Publication request does not match the retained task binding.");
+          }
+          const accepted = publicationAcceptance(retained);
+          const previous = latestPublicationPush(retained);
+          if (previous?.status === "writing") {
+            if (activePublicationPushes.has(previous.operationId)) {
+              throw new Error("Task branch publication is already in progress.");
+            }
+            const inspection: PublicationPushOperation = {
+              ...previous,
+              status: "needs-inspection",
+              reason: "Push was unfinished when the Gateway stopped; inspect the remote branch.",
+              updatedAt: new Date().toISOString(),
+            };
+            await updatePublicationPush(retained, inspection);
+            respond(true, { status: inspection.status, publication: accepted, push: inspection });
+            return;
+          }
+          if (previous && previous.status !== "retry-approved") {
+            respond(true, { status: previous.status, publication: accepted, push: previous });
+            return;
+          }
+          const operation: PublicationPushOperation = {
+            operationId: randomUUID(),
+            status: "needs-inspection",
+            repository: accepted.repository,
+            ref: `refs/heads/${accepted.workspaceBranch}`,
+            headCommit: accepted.headCommit,
+            updatedAt: new Date().toISOString(),
+          };
+          try {
+            await verifyTaskPublication({
+              repository: accepted.repository,
+              repositoryPath: config.coding!.repositoryPath,
+              workspacePath: accepted.workspacePath,
+              branch: accepted.workspaceBranch,
+              baseCommit: accepted.baseCommit,
+              expectedHead: accepted.headCommit,
+            });
+          } catch {
+            const blocked = {
+              ...operation,
+              reason: "Worktree, branch, base ancestry, clean state or exact head verification failed.",
+            };
+            await updatePublicationPush(retained, blocked);
+            respond(true, { status: blocked.status, publication: accepted, push: blocked });
+            return;
+          }
+          sessionAccessAuthority.assertCurrent();
+          let token: string;
+          try {
+            token = config.github?.appId !== undefined
+              ? await githubApp.publicationTokenForRepository(
+                config.github.appId, config.github.installationId, accepted.repository,
+              )
+              : (await readFile("/run/secrets/agent-crew-github-installation-token", "utf8")).trim();
+            if (!token) throw new Error("Publication token is empty.");
+          } catch {
+            const failed: PublicationPushOperation = {
+              ...operation,
+              status: "failed",
+              reason: "GitHub publication credentials were unavailable.",
+            };
+            await updatePublicationPush(retained, failed);
+            respond(true, { status: failed.status, publication: accepted, push: failed });
+            return;
+          }
+          sessionAccessAuthority.assertCurrent();
+          let remoteHead: string | undefined;
+          try {
+            remoteHead = await inspectTaskRemoteHead({
+              repository: accepted.repository,
+              token,
+              workspacePath: accepted.workspacePath,
+              branch: accepted.workspaceBranch,
+            });
+          } catch {
+            const inspection = {
+              ...operation,
+              reason: "Existing remote task branch could not be inspected unambiguously.",
+            };
+            await updatePublicationPush(retained, inspection);
+            respond(true, { status: inspection.status, publication: accepted, push: inspection });
+            return;
+          }
+          sessionAccessAuthority.assertCurrent();
+          if (remoteHead !== undefined) {
+            const matching: PublicationPushOperation = remoteHead === accepted.headCommit
+              ? { ...operation, status: "confirmed", updatedAt: new Date().toISOString() }
+              : {
+                ...operation,
+                reason: `Remote task branch has incompatible head ${remoteHead}.`,
+              };
+            await updatePublicationPush(retained, matching);
+            respond(true, { status: matching.status, publication: accepted, push: matching });
+            return;
+          }
+          const writing: PublicationPushOperation = {
+            ...operation,
+            status: "writing",
+            updatedAt: new Date().toISOString(),
+          };
+          activePublicationPushes.add(writing.operationId);
+          try {
+            await updatePublicationPush(retained, writing);
+            sessionAccessAuthority.assertCurrent();
+            let dispatchStarted = false;
+            try {
+              await verifyTaskPublication({
+                repository: accepted.repository,
+                repositoryPath: config.coding!.repositoryPath,
+                workspacePath: accepted.workspacePath,
+                branch: accepted.workspaceBranch,
+                baseCommit: accepted.baseCommit,
+                expectedHead: accepted.headCommit,
+              });
+              sessionAccessAuthority.assertCurrent();
+              dispatchStarted = true;
+              await pushTaskBranch({
+                repository: accepted.repository,
+                token,
+                workspacePath: accepted.workspacePath,
+                branch: accepted.workspaceBranch,
+                expectedHead: accepted.headCommit,
+                ...(remoteHead !== undefined ? { previousRemoteHead: remoteHead } : {}),
+              });
+            } catch (error) {
+              const rejected = error instanceof TaskPushError && error.code === "PUSH_REJECTED";
+              const failed = {
+                ...writing,
+                status: rejected ? "failed" as const : "needs-inspection" as const,
+                reason: !dispatchStarted
+                  ? "Publication binding changed during final worktree verification; no push was dispatched."
+                  : rejected
+                    ? "GitHub definitively rejected the branch push without a confirmed remote effect."
+                    : "Branch push outcome is uncertain or the remote branch changed; inspect before retrying.",
+                updatedAt: new Date().toISOString(),
+              };
+              await updatePublicationPush(retained, failed);
+              respond(true, { status: failed.status, publication: accepted, push: failed });
+              return;
+            }
+            sessionAccessAuthority.assertCurrent();
+            const confirmed: PublicationPushOperation = {
+              ...writing,
+              status: "confirmed",
+              updatedAt: new Date().toISOString(),
+            };
+            await updatePublicationPush(retained, confirmed);
+            respond(true, { status: confirmed.status, publication: accepted, push: confirmed });
+          } finally {
+            activePublicationPushes.delete(writing.operationId);
+          }
+        });
       } catch (error) {
         respond(false, undefined, {
           code: "PUBLICATION_ACCEPTANCE_BLOCKED",
@@ -1170,8 +1407,34 @@ export default definePluginEntry({
                 },
               };
             })
+            : values.target === "publication-push"
+              ? await serializePublication(async () => patchJob(issue, (existing) => {
+                const current = latestPublicationPush(existing);
+                if (!current || (current.status !== "needs-inspection" && current.status !== "failed") ||
+                    (values.decision !== "retry" && values.decision !== "abandon")) {
+                  throw new Error("publication push is not awaiting a valid operator decision");
+                }
+                const resolved: PublicationPushOperation = {
+                  ...current,
+                  status: values.decision === "retry" ? "retry-approved" : "abandoned",
+                  decision: `${values.decision}: ${note}`,
+                  updatedAt: new Date().toISOString(),
+                };
+                return {
+                  ...existing,
+                  publication: {
+                    pushOperations: [
+                      ...existing.publication!.pushOperations.slice(0, -1),
+                      resolved,
+                    ],
+                  },
+                  updatedAt: new Date().toISOString(),
+                };
+              }))
             : await serialize(() => patchJob(issue, (existing) => {
-            if (values.target !== undefined && values.target !== "workflow") throw new Error("target must be workflow or issue-update");
+            if (values.target !== undefined && values.target !== "workflow") {
+              throw new Error("target must be workflow, issue-update or publication-push");
+            }
             if ((values.decision !== "retry" && values.decision !== "abandon") || !existing || existing.status !== "needs-inspection") {
               throw new Error("workflow is not awaiting a valid operator decision");
             }

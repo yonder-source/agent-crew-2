@@ -292,6 +292,141 @@ export async function verifyTaskDelivery(options: {
   return head;
 }
 
+export async function verifyTaskPublication(options: {
+  repository: string;
+  repositoryPath: string;
+  workspacePath: string;
+  branch: string;
+  baseCommit: string;
+  expectedHead: string;
+}): Promise<void> {
+  if (!GITHUB_REPOSITORY.test(options.repository) ||
+      !/^openclaw\/agent-crew-issue-[1-9][0-9]*$/.test(options.branch) ||
+      !/^[a-f0-9]{40,64}$/.test(options.expectedHead)) {
+    throw new Error("Recorded publication head is invalid.");
+  }
+  if (!(await inspectRepositoryCheckout(options.repositoryPath, options.repository))) {
+    throw new Error("Recorded publication checkout is missing.");
+  }
+  const head = await verifyTaskDelivery(options);
+  if (head !== options.expectedHead) {
+    throw new Error("Recorded coding delivery head changed; operator inspection is required.");
+  }
+}
+
+function credentialGitArguments(helper: string): string[] {
+  return [
+    "-c", "credential.helper=",
+    "-c", "credential.useHttpPath=true",
+    "-c", `credential.helper=!${process.execPath} ${helper}`,
+  ];
+}
+
+async function authenticatedTaskGit(options: {
+  repository: string;
+  token: string;
+  workspacePath: string;
+  timeoutMs: number;
+  args: string[];
+}): Promise<string> {
+  const credential = await createCredentialChannel(options.repository, options.token);
+  const helper = fileURLToPath(new URL("./git-credential-helper.js", import.meta.url));
+  try {
+    const result = await execFile("git", [
+      "-C", options.workspacePath,
+      "-c", "core.hooksPath=/dev/null",
+      "-c", "core.fsmonitor=false",
+      ...credentialGitArguments(helper),
+      ...options.args,
+    ], {
+      timeout: options.timeoutMs,
+      maxBuffer: 1_000_000,
+      env: gitEnvironment(credential.socketPath),
+    });
+    return result.stdout.trim();
+  } finally {
+    await credential.close();
+  }
+}
+
+export async function inspectTaskRemoteHead(options: {
+  repository: string;
+  token: string;
+  workspacePath: string;
+  branch: string;
+}): Promise<string | undefined> {
+  if (!GITHUB_REPOSITORY.test(options.repository) || !options.token ||
+      !/^openclaw\/agent-crew-issue-[1-9][0-9]*$/.test(options.branch)) {
+    throw new Error("Remote task branch inspection is invalid.");
+  }
+  const output = await authenticatedTaskGit({
+    ...options,
+    timeoutMs: 120_000,
+    args: ["ls-remote", "--refs", "origin", `refs/heads/${options.branch}`],
+  });
+  if (!output) return undefined;
+  const rows = output.split("\n");
+  if (rows.length !== 1) throw new Error("Remote task branch lookup returned ambiguous results.");
+  const head = rows[0]?.split(/\s+/, 1)[0];
+  if (!head || !/^[a-f0-9]{40,64}$/.test(head)) {
+    throw new Error("Remote task branch lookup returned an invalid head.");
+  }
+  return head;
+}
+
+export class TaskPushError extends Error {
+  constructor(readonly code: "PUSH_REJECTED" | "PUSH_UNCERTAIN" | "REMOTE_BRANCH_MISMATCH", message: string) {
+    super(message);
+    this.name = "TaskPushError";
+  }
+}
+
+export async function pushTaskBranch(options: {
+  repository: string;
+  token: string;
+  workspacePath: string;
+  branch: string;
+  expectedHead: string;
+  previousRemoteHead?: string;
+}): Promise<void> {
+  if (!GITHUB_REPOSITORY.test(options.repository) || !options.token ||
+      !/^openclaw\/agent-crew-issue-[1-9][0-9]*$/.test(options.branch) ||
+      !/^[a-f0-9]{40,64}$/.test(options.expectedHead) ||
+      (options.previousRemoteHead !== undefined && !/^[a-f0-9]{40,64}$/.test(options.previousRemoteHead))) {
+    throw new Error("Task branch push binding is invalid.");
+  }
+  try {
+    await authenticatedTaskGit({
+      ...options,
+      timeoutMs: 120_000,
+      args: ["push", "--porcelain", "origin", `${options.expectedHead}:refs/heads/${options.branch}`],
+    });
+  } catch (error) {
+    let remoteHead: string | undefined;
+    try {
+      remoteHead = await inspectTaskRemoteHead(options);
+    } catch {
+      throw new TaskPushError("PUSH_UNCERTAIN", "Task branch push outcome could not be confirmed.");
+    }
+    if (remoteHead === options.expectedHead) return;
+    if (remoteHead !== undefined && remoteHead !== options.previousRemoteHead) {
+      throw new TaskPushError("REMOTE_BRANCH_MISMATCH", "Remote task branch changed to an incompatible head.");
+    }
+    const details = error && typeof error === "object"
+      ? `${"stdout" in error ? String(error.stdout) : ""}\n${"stderr" in error ? String(error.stderr) : ""}`
+      : "";
+    if (remoteHead === options.previousRemoteHead &&
+        details.split(/\r?\n/).some((line) => /\[(?:remote )?rejected\](?:\s.*)?$/.test(line.trim()))) {
+      throw new TaskPushError("PUSH_REJECTED", "Task branch push was definitively rejected.");
+    }
+    throw new TaskPushError("PUSH_UNCERTAIN", "Task branch push outcome is uncertain.");
+  }
+  const remoteHead = await inspectTaskRemoteHead(options);
+  if (remoteHead !== options.expectedHead) {
+    throw new TaskPushError("PUSH_UNCERTAIN", "Task branch push did not confirm the recorded head.");
+  }
+}
+
 export async function commitTaskDelivery(options: {
   repositoryPath: string; workspacePath: string; branch: string; baseCommit: string; issueNumber: number;
 }): Promise<string> {
