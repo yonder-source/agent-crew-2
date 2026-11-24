@@ -10,7 +10,8 @@ import { IssueDiscovery } from "./discovery.js";
 import { GitHubIssueError, OctokitGitHubIssueProvider } from "./github-issues.js";
 import { GitHubAppClient, GitHubAppError } from "./github-app.js";
 import {
-  GitHubPullRequestError, OctokitGitHubPullRequestProvider, type GitHubPullRequest,
+  GitHubPullRequestError, OctokitGitHubPullRequestProvider,
+  pullRequestUrlMatches, type GitHubPullRequest,
 } from "./github-pulls.js";
 import {
   cloneRepository, prepareTaskBase, verifyTaskWorkspace, commitTaskDelivery, verifyTaskPublication,
@@ -451,8 +452,11 @@ export default definePluginEntry({
               operation.pullRequest.baseRef !== "main" ||
               operation.pullRequest.state !== "open" ||
               !operation.pullRequest.draft || operation.pullRequest.merged ||
-              operation.pullRequest.url !==
-                `https://github.com/${operation.repository}/pull/${String(operation.pullRequest.number)}` ||
+              !pullRequestUrlMatches(
+                operation.pullRequest.url,
+                operation.repository,
+                operation.pullRequest.number,
+              ) ||
               createHash("sha256").update(operation.pullRequest.title).digest("hex") !== operation.titleHash ||
               !new RegExp(`(?:^|\\n)Fixes #${String(operation.issueNumber)}(?:\\s|$)`)
                 .test(operation.pullRequest.body ?? "")

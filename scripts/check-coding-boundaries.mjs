@@ -13,6 +13,7 @@ import { codingPrompt } from "../dist/coding-prompt.js";
 import { draftSlackSettings } from "../dist/slack-settings.js";
 import { slackCredentialStatus } from "../dist/slack-credentials.js";
 import { normalizeCodingValidation, isCodingDelivery, normalizeCodingUsage, isCodingUsage, addCodingUsage, parseTokenBudget } from "../dist/coding-result.js";
+import { pullRequestUrlMatches } from "../dist/github-pulls.js";
 
 const source = readFileSync("dist/index.js", "utf8")
   .replace(/^import .*;\n/gm, "")
@@ -73,7 +74,7 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
       if (slackMessages.length === failSlackAt) throw new Error("secret-provider-error");
       return `100.${String(slackMessages.length).padStart(6, "0")}`;
     }, performance: { now: () => clock },
-    TaskBaseError, createHash, randomUUID, codingPrompt, normalizeCodingValidation, isCodingDelivery, normalizeCodingUsage, isCodingUsage, addCodingUsage, parseTokenBudget, slackCredentialStatus, draftSlackSettings,
+    TaskBaseError, createHash, randomUUID, codingPrompt, normalizeCodingValidation, isCodingDelivery, normalizeCodingUsage, isCodingUsage, addCodingUsage, parseTokenBudget, slackCredentialStatus, draftSlackSettings, pullRequestUrlMatches,
     validateSlackSettings: async (settings) => Object.keys(settings).map(role => ({ id: `${role}-slack`, status: "passed", message: "Fixture verified" })),
     readFile: async () => "fixture-token",
     prepareTaskBase: async () => "a".repeat(40),

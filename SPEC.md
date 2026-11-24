@@ -446,6 +446,10 @@ summaries and `Fixes #<issue-number>`. Reuse an existing open draft only when it
 repository, issue association, head branch/SHA and base match the delivery.
 Closed, merged, non-draft, mismatched or ambiguously identified PRs require
 inspection rather than automatic replacement or duplicate creation.
+Lookup the task head across all bases so an existing mismatched-base PR cannot
+look absent. Compare repository canonical identity case-insensitively. A 422
+response that indicates an existing/conflicting PR is uncertain and requires
+inspection; only a definitive rejected operation becomes failed.
 
 Public publication status is `published`, `needs-inspection`, `failed` or
 `abandoned`; only `published` may expose a confirmed PR URL. Preserve coding

@@ -89,6 +89,9 @@ and validation summaries plus `Fixes #<issue-number>` in the body. These fields
 are display content, not authorization or executable instructions.
 
 Before creating a PR, look for an existing PR for the bound repository/head.
+The lookup must include PRs for every base, not only `main`, so an existing PR
+with a mismatched base is visible and requires inspection. Repository name
+comparison is case-insensitive for GitHub canonical identities.
 Return an existing open draft idempotently only after verifying its repository,
 issue association, head branch, exact head SHA and `main` base. A closed, merged,
 non-draft or mismatched PR requires inspection; do not reopen, convert, replace
@@ -100,6 +103,8 @@ from the push. Confirm the returned PR identity/state before marking it
 `confirmed`. Unacknowledged or uncertain creation requires operator inspection;
 retrying publication cannot replay it just because push was already confirmed.
 Use the same rejected-versus-uncertain classification as push.
+A `422` response is not inherently definitive: a conflict such as an already
+existing pull request must enter inspection and be reconciled before retry.
 The Controller records these attempts in `publication.prOperations`, uses a
 fresh repository-scoped pull-requests-write installation token for each PR
 operation, and builds the title/body only from retained Controller state and

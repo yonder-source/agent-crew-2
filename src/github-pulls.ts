@@ -51,6 +51,20 @@ function isSafeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
+export function pullRequestUrlMatches(value: unknown, repository: string, number: number): boolean {
+  if (typeof value !== "string" || !Number.isSafeInteger(number) || number < 1) return false;
+  try {
+    const url = new URL(value);
+    if (url.origin !== "https://github.com" || url.username || url.password ||
+        url.hash || url.search) return false;
+    const match = /^\/([^/]+\/[^/]+)\/pull\/([1-9][0-9]*)$/.exec(url.pathname);
+    return match?.[1]?.toLowerCase() === repository.toLowerCase() &&
+      Number(match[2]) === number;
+  } catch {
+    return false;
+  }
+}
+
 function parsePullRequest(value: unknown, repository: string): GitHubPullRequest {
   if (!isRecord(value) || !isSafeInteger(value.id) || !isSafeInteger(value.number) ||
       typeof value.title !== "string" || value.title.length > 256 ||
@@ -64,8 +78,8 @@ function parsePullRequest(value: unknown, repository: string): GitHubPullRequest
       typeof value.base.repo.full_name !== "string" || typeof value.head.repo.full_name !== "string") {
     throw new GitHubPullRequestError("GITHUB_RESPONSE_INVALID", "GitHub returned an invalid pull request.");
   }
-  const expectedUrl = `https://github.com/${repository.toLowerCase()}/pull/${String(value.number)}`;
-  if (typeof value.html_url !== "string" || value.html_url !== expectedUrl ||
+  if (typeof value.html_url !== "string" ||
+      !pullRequestUrlMatches(value.html_url, repository, value.number) ||
       value.base.repo.full_name.toLowerCase() !== repository.toLowerCase() ||
       value.head.repo.full_name.toLowerCase() !== repository.toLowerCase()) {
     throw new GitHubPullRequestError("GITHUB_RESPONSE_INVALID", "GitHub returned a pull request from a different repository.");
@@ -92,6 +106,17 @@ function requestAllowed(path: string, url: URL, method: string): boolean {
   if (url.origin !== "https://api.github.com" || url.username || url.password || url.hash) return false;
   if (url.pathname.toLowerCase() === `${path}/pulls` && method === "GET") return true;
   return url.pathname.toLowerCase() === `${path}/pulls` && method === "POST";
+}
+
+function pullRequestCreateConflict(error: unknown): boolean {
+  if (!isRecord(error) || error.status !== 422) return false;
+  const response = isRecord(error.response) ? error.response : undefined;
+  const data = response && isRecord(response.data) ? response.data : undefined;
+  const text = [
+    typeof error.message === "string" ? error.message : "",
+    data ? JSON.stringify(data) : "",
+  ].join("\n");
+  return /already exists|pull request .*exists|another pull request|head .*already/i.test(text);
 }
 
 async function boundedResponse(response: Response, maximumBytes: number, signal: AbortSignal): Promise<Response> {
@@ -164,7 +189,6 @@ export class OctokitGitHubPullRequestProvider {
         repo: target.name,
         state: "all",
         head: `${target.owner}:${options.headRef}`,
-        base: options.baseRef,
         per_page: 100,
       })) {
         pages += 1;
@@ -235,6 +259,9 @@ export class OctokitGitHubPullRequestProvider {
         throw new GitHubPullRequestError("GITHUB_PULL_REQUEST_CREATE_UNCERTAIN", "GitHub pull request creation requires inspection.");
       }
       const status = isRecord(error) ? error.status : undefined;
+      if (state.started && status === 422 && pullRequestCreateConflict(error)) {
+        throw new GitHubPullRequestError("GITHUB_PULL_REQUEST_CREATE_UNCERTAIN", "GitHub pull request creation may have an existing conflicting draft; inspect before retrying.");
+      }
       if (state.started && typeof status === "number" && [400, 401, 403, 404, 422].includes(status)) {
         throw new GitHubPullRequestError("GITHUB_PULL_REQUEST_CREATE_REJECTED", "GitHub rejected pull request creation.");
       }
