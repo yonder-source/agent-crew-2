@@ -122,9 +122,10 @@ function pullRequest422Disposition(error: unknown): PullRequest422Disposition {
     return "conflict";
   }
   if (Array.isArray(data?.errors)) {
-    const errors = data.errors.filter(isRecord);
-    if (errors.length > 0 && errors.every((item) => {
-      const code = typeof item.code === "string" ? item.code.toLowerCase() : "";
+    const errors = data.errors;
+    if (errors.length > 0 && errors.every((value) => {
+      if (!isRecord(value)) return false;
+      const code = typeof value.code === "string" ? value.code.toLowerCase() : "";
       return ["missing", "missing_field", "invalid", "unprocessable"].includes(code);
     })) {
       return "definitive-rejection";

@@ -118,6 +118,19 @@ const missingFieldResult = await provider.create({ ...expected, body }).then(
   (error) => error instanceof GitHubPullRequestError ? error.code : "wrong-type",
 );
 assert.equal(missingFieldResult, "GITHUB_PULL_REQUEST_CREATE_REJECTED");
+createFailure = response({
+  message: "Validation Failed",
+  errors: [
+    { resource: "PullRequest", code: "missing_field", field: "head" },
+    "opaque provider error",
+  ],
+}, { status: 422 });
+const malformedMixedResult = await provider.create({ ...expected, body }).then(
+  () => "unexpected",
+  (error) => error instanceof GitHubPullRequestError ? error.code : "wrong-type",
+);
+assert.equal(malformedMixedResult, "GITHUB_PULL_REQUEST_CREATE_UNCERTAIN",
+  "An unrecognized entry must prevent treating the whole 422 response as definitive");
 createFailure = new Error("SECRET transport detail");
 await assert.rejects(provider.create({ ...expected, body }), (error) =>
   error instanceof GitHubPullRequestError && error.code === "GITHUB_PULL_REQUEST_CREATE_UNCERTAIN" &&
