@@ -35,6 +35,8 @@ assert.equal(await client.installationTokenForRepository("123", 17, "owner/repo"
 assert.deepEqual(requests.at(-1).body, { repository_ids: [23], permissions: { contents: "read" } });
 assert.equal(await client.publicationTokenForRepository("123", 17, "owner/repo"), "fixture-token");
 assert.deepEqual(requests.at(-1).body, { repository_ids: [23], permissions: { contents: "write" } });
+assert.equal(await client.pullRequestTokenForRepository("123", 17, "owner/repo"), "fixture-token");
+assert.deepEqual(requests.at(-1).body, { repository_ids: [23], permissions: { pull_requests: "write" } });
 const requestsBeforeIssue = requests.length;
 assert.equal(await client.issueTokenForRepository("123", 17, "owner/repo"), "fixture-token");
 assert.deepEqual(requests.at(-1).body, { repository_ids: [23], permissions: { issues: "write" } });

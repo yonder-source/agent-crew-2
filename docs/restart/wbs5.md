@@ -100,6 +100,11 @@ from the push. Confirm the returned PR identity/state before marking it
 `confirmed`. Unacknowledged or uncertain creation requires operator inspection;
 retrying publication cannot replay it just because push was already confirmed.
 Use the same rejected-versus-uncertain classification as push.
+The Controller records these attempts in `publication.prOperations`, uses a
+fresh repository-scoped pull-requests-write installation token for each PR
+operation, and builds the title/body only from retained Controller state and
+the re-read assigned issue. A confirmed exact draft is retained and returned
+without another lookup or create on repeated calls.
 
 **Done when:** One matching draft PR is created or a verified existing draft is
 returned. Push success alone is never reported as PR publication success.

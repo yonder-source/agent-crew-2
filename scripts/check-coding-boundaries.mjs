@@ -50,6 +50,7 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
   let publicationVerificationFailure = false;
   let remoteTaskHead;
   let taskPushFailure;
+  let pullRequestMode;
   let publicationSessionId = "native-session-7";
   let failConfigPatch = false;
   let inventory = { sessions: [] };
@@ -105,7 +106,52 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
     GitHubAppClient: class {
       async installationTokenForRepository() { return "fixture-token"; }
       async publicationTokenForRepository() { return "fixture-publication-token"; }
+      async pullRequestTokenForRepository() { return "fixture-pull-request-token"; }
       async repositoryAccess() { return { permissions: { contents: "write", issues: "write", pull_requests: "write" } }; }
+    },
+    GitHubPullRequestError: class GitHubPullRequestError extends Error {
+      constructor(code, message) { super(message); this.code = code; }
+    },
+    OctokitGitHubPullRequestProvider: class {
+      async findExisting(options) {
+        const retained = session.pluginExtensions[0].value.publication.prOperations.at(-1);
+        assert.equal(retained.status, "needs-inspection",
+          "A retained PR lookup boundary must exist before external PR inspection");
+        calls.push({ method: "pull-request-lookup", params: options });
+        if (pullRequestMode === "lookup-uncertain") {
+          throw new Error("Fixture lookup transport failed");
+        }
+        if (pullRequestMode === "lookup-mismatch") {
+          throw new context.GitHubPullRequestError("GITHUB_PULL_REQUEST_MISMATCH", "Fixture mismatch");
+        }
+        if (pullRequestMode === "existing") return {
+          repository: options.repository, id: 123, number: 77,
+          url: `https://github.com/${options.repository}/pull/77`,
+          title: options.issueTitle, body: "Fixture existing draft\n\nFixes #7",
+          state: "open", draft: true, merged: false,
+          baseRef: options.baseRef, headRef: options.headRef, headCommit: options.headCommit,
+        };
+        return undefined;
+      }
+      async create(options) {
+        const retained = session.pluginExtensions[0].value.publication.prOperations.at(-1);
+        assert.equal(retained.status, "writing",
+          "A durable writing marker must precede draft PR creation");
+        calls.push({ method: "pull-request-create", params: options });
+        if (pullRequestMode === "create-rejected") {
+          throw new context.GitHubPullRequestError("GITHUB_PULL_REQUEST_CREATE_REJECTED", "Fixture rejected");
+        }
+        if (pullRequestMode === "create-uncertain") {
+          throw new context.GitHubPullRequestError("GITHUB_PULL_REQUEST_CREATE_UNCERTAIN", "Fixture uncertain");
+        }
+        return {
+          repository: options.repository, id: 124, number: 78,
+          url: `https://github.com/${options.repository}/pull/78`,
+          title: options.issueTitle, body: options.body,
+          state: "open", draft: true, merged: false,
+          baseRef: options.baseRef, headRef: options.headRef, headCommit: options.headCommit,
+        };
+      }
     },
     validateCheckout: async () => ({ id: "checkout", status: "passed", message: "Fixture remote matches" }),
     cloneRepository: async (options) => { calls.push({ method: "clone", params: options }); return { status: "cloned" }; },
@@ -251,6 +297,7 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
     setRemoteTaskHead(value) { remoteTaskHead = value; },
     failTaskPush(code) { taskPushFailure = code; },
     allowTaskPush() { taskPushFailure = undefined; },
+    setPullRequestMode(value) { pullRequestMode = value; },
     setPublicationSessionId(value) { publicationSessionId = value; },
     requestInput(value, active = false) { requestInput = value; hasActiveRun = active; },
     setStoppedRun(value) { stoppedRunId = value; },
@@ -301,11 +348,16 @@ assert.equal(acceptedPublication.value.push.status, "confirmed");
 assert.equal(acceptedPublication.value.push.repository, "owner/repo");
 assert.equal(acceptedPublication.value.push.ref, `refs/heads/${branch}`);
 assert.equal(acceptedPublication.value.push.headCommit, "b".repeat(40));
+assert.equal(acceptedPublication.value.pullRequest.status, "confirmed");
+assert.equal(acceptedPublication.value.pullRequest.pullRequest.number, 78);
+assert.match(acceptedPublication.value.pullRequest.pullRequest.body, /Fixes #7/);
 assert.equal(success.calls.find(call => call.method === "verify-publication")
   .params.expectedHead, "b".repeat(40));
 assert.equal(success.calls.filter(call => call.method === "push-task-branch").length, 1);
 assert.equal(success.calls.find(call => call.method === "push-task-branch")
   .params.token, "fixture-token");
+assert.equal(success.calls.filter(call => call.method === "pull-request-lookup").length, 1);
+assert.equal(success.calls.filter(call => call.method === "pull-request-create").length, 1);
 assert.equal((await success.method("agent-crew.publication.accept", {
   sessionKey: "agent:coding:other",
 })).ok, false);
@@ -357,6 +409,8 @@ assert.equal((await success.method("agent-crew.publication.accept", {
 })).value.status, "confirmed");
 assert.equal(success.calls.filter(call => call.method === "push-task-branch").length, 1,
   "Repeated publication must not replay a confirmed push");
+assert.equal(success.calls.filter(call => call.method === "pull-request-create").length, 1,
+  "Repeated publication must not duplicate a confirmed draft PR");
 
 const failed = harness();
 failed.setCoding("error", "Coding failed");
@@ -457,6 +511,46 @@ const rejectedPush = await rejectedPublication.method("agent-crew.publication.ac
 });
 assert.equal(rejectedPush.value.status, "failed");
 
+const existingDraft = harness();
+existingDraft.setPullRequestMode("existing");
+const existingDraftJob = (await existingDraft.method("agent-crew.dispatch", issue)).value.job;
+assert.equal(existingDraftJob.publication.prOperations.at(-1).status, "confirmed");
+assert.equal(existingDraftJob.publication.prOperations.at(-1).pullRequest.number, 77);
+assert.equal(existingDraft.calls.filter(call => call.method === "pull-request-create").length, 0);
+
+const mismatchedDraft = harness();
+mismatchedDraft.setPullRequestMode("lookup-mismatch");
+const mismatchedDraftJob = (await mismatchedDraft.method("agent-crew.dispatch", issue)).value.job;
+assert.equal(mismatchedDraftJob.publication.prOperations.at(-1).status, "needs-inspection");
+assert.equal(mismatchedDraft.calls.filter(call => call.method === "pull-request-create").length, 0);
+
+const uncertainDraft = harness();
+uncertainDraft.setPullRequestMode("create-uncertain");
+const uncertainDraftJob = (await uncertainDraft.method("agent-crew.dispatch", issue)).value.job;
+const uncertainDraftOperation = uncertainDraftJob.publication.prOperations.at(-1);
+assert.equal(uncertainDraftOperation.status, "needs-inspection");
+assert.equal((await uncertainDraft.method("agent-crew.publication.accept", {
+  sessionKey: uncertainDraftJob.sessionKey,
+})).value.pullRequest.status, "needs-inspection");
+assert.equal(uncertainDraft.calls.filter(call => call.method === "pull-request-create").length, 1,
+  "An uncertain PR create must not replay automatically");
+assert.equal((await uncertainDraft.method("agent-crew.resolve", {
+  ...issue, target: "publication-pr", decision: "retry",
+  note: "GitHub inspected; no draft was created",
+})).ok, true);
+uncertainDraft.setPullRequestMode();
+const retriedDraft = (await uncertainDraft.method("agent-crew.publication.accept", {
+  sessionKey: uncertainDraftJob.sessionKey,
+})).value;
+assert.equal(retriedDraft.pullRequest.status, "confirmed");
+assert.notEqual(retriedDraft.pullRequest.operationId, uncertainDraftOperation.operationId);
+assert.equal(uncertainDraft.session().pluginExtensions[0].value.publication.prOperations.length, 2);
+
+const rejectedDraft = harness();
+rejectedDraft.setPullRequestMode("create-rejected");
+const rejectedDraftJob = (await rejectedDraft.method("agent-crew.dispatch", issue)).value.job;
+assert.equal(rejectedDraftJob.publication.prOperations.at(-1).status, "failed");
+
 const interruptedPushSnapshot = structuredClone(success.session());
 const interruptedPush = interruptedPushSnapshot.pluginExtensions[0].value.publication.pushOperations.at(-1);
 interruptedPush.status = "writing";
@@ -468,6 +562,18 @@ const interruptedResult = await interruptedPushRestart.method("agent-crew.public
 assert.equal(interruptedResult.value.status, "needs-inspection");
 assert.match(interruptedResult.value.push.reason, /Gateway stopped/);
 assert.equal(interruptedPushRestart.calls.filter(call => call.method === "push-task-branch").length, 0);
+
+const interruptedPrSnapshot = structuredClone(success.session());
+const interruptedPr = interruptedPrSnapshot.pluginExtensions[0].value.publication.prOperations.at(-1);
+interruptedPr.status = "writing";
+delete interruptedPr.pullRequest;
+const interruptedPrRestart = harness(interruptedPrSnapshot);
+const interruptedPrResult = await interruptedPrRestart.method("agent-crew.publication.accept", {
+  sessionKey: first.value.job.sessionKey,
+});
+assert.equal(interruptedPrResult.value.pullRequest.status, "needs-inspection");
+assert.match(interruptedPrResult.value.pullRequest.reason, /Gateway stopped/);
+assert.equal(interruptedPrRestart.calls.filter(call => call.method === "pull-request-create").length, 0);
 
 const orphan = harness({
   sessionRoot: workspacePath, sessionId: "native-session-7",

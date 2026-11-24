@@ -10,6 +10,9 @@ import { IssueDiscovery } from "./discovery.js";
 import { GitHubIssueError, OctokitGitHubIssueProvider } from "./github-issues.js";
 import { GitHubAppClient, GitHubAppError } from "./github-app.js";
 import {
+  GitHubPullRequestError, OctokitGitHubPullRequestProvider, type GitHubPullRequest,
+} from "./github-pulls.js";
+import {
   cloneRepository, prepareTaskBase, verifyTaskWorkspace, commitTaskDelivery, verifyTaskPublication,
   inspectTaskRemoteHead, pushTaskBranch, TaskBaseError, TaskPushError,
 } from "./repository-clone.js";
@@ -79,6 +82,21 @@ type PublicationPushOperation = {
   reason?: string;
   decision?: string;
 };
+type PublicationPrOperation = {
+  operationId: string;
+  status: "writing" | "needs-inspection" | "confirmed" | "retry-approved" | "failed" | "abandoned";
+  repository: string;
+  issueNumber: number;
+  baseRef: "main";
+  headRef: string;
+  headCommit: string;
+  titleHash: string;
+  bodyHash: string;
+  updatedAt: string;
+  reason?: string;
+  decision?: string;
+  pullRequest?: GitHubPullRequest;
+};
 type Job = Issue & {
   jobId: string;
   sessionKey: string;
@@ -114,6 +132,7 @@ type Job = Issue & {
   };
   publication?: {
     pushOperations: PublicationPushOperation[];
+    prOperations?: PublicationPrOperation[];
   };
 };
 
@@ -174,14 +193,45 @@ function isJob(value: unknown): value is Job {
   if (value.publication === undefined) return true;
   if (!isRecord(value.publication) || !Array.isArray(value.publication.pushOperations) ||
       value.publication.pushOperations.length === 0 || value.publication.pushOperations.length > 100) return false;
-  return value.publication.pushOperations.every((operation) => isRecord(operation) &&
+  if (!value.publication.pushOperations.every((operation) => isRecord(operation) &&
     ["writing", "needs-inspection", "confirmed", "retry-approved", "failed", "abandoned"].includes(String(operation.status)) &&
     typeof operation.operationId === "string" && typeof operation.repository === "string" &&
     typeof operation.ref === "string" && /^refs\/heads\/openclaw\/agent-crew-issue-[1-9][0-9]*$/.test(operation.ref) &&
     typeof operation.headCommit === "string" && /^[a-f0-9]{40,64}$/.test(operation.headCommit) &&
     typeof operation.updatedAt === "string" &&
     (operation.reason === undefined || typeof operation.reason === "string") &&
-    (operation.decision === undefined || typeof operation.decision === "string"));
+    (operation.decision === undefined || typeof operation.decision === "string"))) return false;
+  if (value.publication.prOperations === undefined) return true;
+  if (!Array.isArray(value.publication.prOperations) || value.publication.prOperations.length === 0 ||
+      value.publication.prOperations.length > 100) return false;
+  return value.publication.prOperations.every((operation) => isRecord(operation) &&
+    ["writing", "needs-inspection", "confirmed", "retry-approved", "failed", "abandoned"].includes(String(operation.status)) &&
+    typeof operation.operationId === "string" && typeof operation.repository === "string" &&
+    typeof operation.issueNumber === "number" && Number.isSafeInteger(operation.issueNumber) &&
+    operation.issueNumber > 0 && operation.baseRef === "main" &&
+    typeof operation.headRef === "string" &&
+    /^openclaw\/agent-crew-issue-[1-9][0-9]*$/.test(operation.headRef) &&
+    typeof operation.headCommit === "string" && /^[a-f0-9]{40,64}$/.test(operation.headCommit) &&
+    typeof operation.titleHash === "string" && /^[a-f0-9]{64}$/.test(operation.titleHash) &&
+    typeof operation.bodyHash === "string" && /^[a-f0-9]{64}$/.test(operation.bodyHash) &&
+    typeof operation.updatedAt === "string" &&
+    (operation.reason === undefined || typeof operation.reason === "string") &&
+    (operation.decision === undefined || typeof operation.decision === "string") &&
+    (operation.pullRequest === undefined || isRecord(operation.pullRequest) &&
+      typeof operation.pullRequest.repository === "string" &&
+      typeof operation.pullRequest.id === "number" && Number.isSafeInteger(operation.pullRequest.id) &&
+      operation.pullRequest.id > 0 &&
+      typeof operation.pullRequest.number === "number" && Number.isSafeInteger(operation.pullRequest.number) &&
+      operation.pullRequest.number > 0 &&
+      typeof operation.pullRequest.url === "string" && typeof operation.pullRequest.title === "string" &&
+      operation.pullRequest.title.length <= 256 &&
+      (operation.pullRequest.body === null ||
+        typeof operation.pullRequest.body === "string" && operation.pullRequest.body.length <= 64_000) &&
+      ["open", "closed"].includes(String(operation.pullRequest.state)) &&
+      typeof operation.pullRequest.draft === "boolean" && typeof operation.pullRequest.merged === "boolean" &&
+      typeof operation.pullRequest.baseRef === "string" && typeof operation.pullRequest.headRef === "string" &&
+      typeof operation.pullRequest.headCommit === "string") &&
+    (operation.status === "confirmed" ? operation.pullRequest !== undefined : operation.pullRequest === undefined));
 }
 
 // Explicit output boundary: continuation credentials stay in session metadata.
@@ -227,6 +277,11 @@ function sessionKey(issue: Issue, agentId: string): string {
   return `agent:${agentId}:agent-crew-${digest.slice(0, 32)}`;
 }
 
+function boundedPublicationSummary(value: string | undefined, maximum = 4_000): string {
+  if (!value) return "No summary reported.";
+  return value.length > maximum ? `${value.slice(0, maximum - 3)}...` : value;
+}
+
 export default definePluginEntry({
   id: "agent-crew",
   name: "Agent Crew",
@@ -251,6 +306,7 @@ export default definePluginEntry({
     let publicationQueue = Promise.resolve();
     const activeIssueUpdates = new Set<string>();
     const activePublicationPushes = new Set<string>();
+    const activePublicationPrs = new Set<string>();
     api.session.state.registerSessionExtension({ namespace: NAMESPACE, description: "Issue admission and workflow status" });
     // Explicit operator credential: use the authenticated public API, not the
     // trusted-plugin-only in-process gateway.request capability.
@@ -271,6 +327,11 @@ export default definePluginEntry({
     const issueProvider = new OctokitGitHubIssueProvider({
       getInstallationToken: async () => config.github?.appId !== undefined
         ? githubApp.issueTokenForRepository(config.github.appId, config.github.installationId, config.github.repository)
+        : readFile("/run/secrets/agent-crew-github-installation-token", "utf8"),
+    });
+    const pullRequestProvider = new OctokitGitHubPullRequestProvider({
+      getInstallationToken: async () => config.github?.appId !== undefined
+        ? githubApp.pullRequestTokenForRepository(config.github.appId, config.github.installationId, config.github.repository)
         : readFile("/run/secrets/agent-crew-github-installation-token", "utf8"),
     });
     const describe = async (issue: Issue) => {
@@ -374,8 +435,33 @@ export default definePluginEntry({
             operation.headCommit !== job.codingDelivery.headCommit))) {
         throw new Error("Invalid publication metadata; operator inspection required");
       }
+      const prOperations = job.publication?.prOperations;
+      if (prOperations !== undefined && (
+          pushOperations === undefined ||
+          prOperations.some((operation) =>
+            operation.repository !== job.repository ||
+            operation.issueNumber !== job.number ||
+            operation.headRef !== job.workspaceBranch ||
+            job.codingDelivery?.status !== "ready" ||
+            operation.headCommit !== job.codingDelivery.headCommit ||
+            operation.pullRequest !== undefined && (
+              operation.pullRequest.repository !== job.repository ||
+              operation.pullRequest.headRef !== operation.headRef ||
+              operation.pullRequest.headCommit !== operation.headCommit ||
+              operation.pullRequest.baseRef !== "main" ||
+              operation.pullRequest.state !== "open" ||
+              !operation.pullRequest.draft || operation.pullRequest.merged ||
+              operation.pullRequest.url !==
+                `https://github.com/${operation.repository}/pull/${String(operation.pullRequest.number)}` ||
+              createHash("sha256").update(operation.pullRequest.title).digest("hex") !== operation.titleHash ||
+              !new RegExp(`(?:^|\\n)Fixes #${String(operation.issueNumber)}(?:\\s|$)`)
+                .test(operation.pullRequest.body ?? "")
+            )))) {
+        throw new Error("Invalid pull request publication metadata; operator inspection required");
+      }
       // Read-only normalization avoids a status request racing an operator reset.
       const currentPush = pushOperations?.at(-1);
+      const currentPr = prOperations?.at(-1);
       return {
         ...job,
         ...(job.status === "starting" && (job.bootId !== bootId || (job.jobId !== startingJobId && !admittingSessions.has(job.sessionKey)))
@@ -392,6 +478,23 @@ export default definePluginEntry({
                   ...currentPush,
                   status: "needs-inspection" as const,
                   reason: "Push was unfinished when the Gateway stopped; inspect the remote branch.",
+                  updatedAt: new Date().toISOString(),
+                },
+              ],
+              ...(prOperations !== undefined ? { prOperations } : {}),
+            },
+          }
+          : {}),
+        ...(currentPr?.status === "writing" && !activePublicationPrs.has(currentPr.operationId)
+          ? {
+            publication: {
+              pushOperations: pushOperations!,
+              prOperations: [
+                ...prOperations!.slice(0, -1),
+                {
+                  ...currentPr,
+                  status: "needs-inspection" as const,
+                  reason: "Pull request creation was unfinished when the Gateway stopped; inspect GitHub.",
                   updatedAt: new Date().toISOString(),
                 },
               ],
@@ -438,6 +541,8 @@ export default definePluginEntry({
     };
     const latestPublicationPush = (job: Job): PublicationPushOperation | undefined =>
       job.publication?.pushOperations.at(-1);
+    const latestPublicationPr = (job: Job): PublicationPrOperation | undefined =>
+      job.publication?.prOperations?.at(-1);
     const updatePublicationPush = async (
       issue: Issue,
       operation: PublicationPushOperation,
@@ -448,8 +553,173 @@ export default definePluginEntry({
         ? [...operations, operation]
         : operations.map((candidate) => candidate.operationId === operation.operationId ? operation : candidate);
       if (pushOperations.length > 100) throw new Error("Publication operation history requires inspection.");
-      return { ...current, publication: { pushOperations }, updatedAt: new Date().toISOString() };
+      const prOperations = current.publication?.prOperations;
+      return {
+        ...current,
+        publication: { pushOperations, ...(prOperations !== undefined ? { prOperations } : {}) },
+        updatedAt: new Date().toISOString(),
+      };
     });
+    const updatePublicationPr = async (
+      issue: Issue,
+      operation: PublicationPrOperation,
+    ): Promise<Job> => patchJob(issue, (current) => {
+      const pushOperations = current.publication?.pushOperations;
+      if (!pushOperations || latestPublicationPush(current)?.status !== "confirmed") {
+        throw new Error("Pull request publication requires a confirmed task branch push.");
+      }
+      const operations = current.publication?.prOperations ?? [];
+      const existing = operations.findIndex((candidate) => candidate.operationId === operation.operationId);
+      const prOperations = existing < 0
+        ? [...operations, operation]
+        : operations.map((candidate) => candidate.operationId === operation.operationId ? operation : candidate);
+      if (prOperations.length > 100) throw new Error("Pull request operation history requires inspection.");
+      return {
+        ...current,
+        publication: { pushOperations, prOperations },
+        updatedAt: new Date().toISOString(),
+      };
+    });
+    const ensurePublicationPr = async (
+      issue: Issue,
+      accepted: PublicationAcceptance,
+      job: Job,
+      assertCurrent: () => void,
+    ): Promise<PublicationPrOperation> => {
+      const confirmedPush = latestPublicationPush(job);
+      if (!confirmedPush || confirmedPush.status !== "confirmed") {
+        throw new Error("Pull request publication requires a confirmed task branch push.");
+      }
+      const previous = latestPublicationPr(job);
+      if (previous?.status === "writing") {
+        if (activePublicationPrs.has(previous.operationId)) {
+          throw new Error("Draft pull request creation is already in progress.");
+        }
+        return {
+          ...previous,
+          status: "needs-inspection",
+          reason: "Pull request creation was unfinished when the Gateway stopped; inspect GitHub.",
+          updatedAt: new Date().toISOString(),
+        };
+      }
+      if (previous && previous.status !== "retry-approved") return previous;
+
+      assertCurrent();
+      const assignedIssue = await issueProvider.readIssue(issue.repository, issue.number);
+      assertCurrent();
+      if (assignedIssue.number !== issue.number || assignedIssue.repository !== issue.repository) {
+        throw new Error("Assigned issue identity changed during pull request publication.");
+      }
+      if (assignedIssue.state !== "open") {
+        throw new Error("Assigned issue is no longer open; inspect before creating a pull request.");
+      }
+      const validationSummary = accepted.validation.summary ??
+        accepted.validation.checks.map((check) =>
+          `${check.command}: ${check.outcome}${check.exitCode === undefined ? "" : ` (exit ${String(check.exitCode)})`}`)
+          .join("\n");
+      const body = [
+        "## Coding summary",
+        boundedPublicationSummary(job.codingSummary),
+        "## Validation",
+        boundedPublicationSummary(validationSummary),
+        `Fixes #${String(issue.number)}`,
+      ].join("\n\n");
+      const operation: PublicationPrOperation = {
+        operationId: randomUUID(),
+        status: "needs-inspection",
+        repository: accepted.repository,
+        issueNumber: issue.number,
+        baseRef: "main",
+        headRef: accepted.workspaceBranch,
+        headCommit: accepted.headCommit,
+        titleHash: createHash("sha256").update(assignedIssue.title).digest("hex"),
+        bodyHash: createHash("sha256").update(body).digest("hex"),
+        updatedAt: new Date().toISOString(),
+      };
+      await updatePublicationPr(issue, operation);
+      assertCurrent();
+      let existing: GitHubPullRequest | undefined;
+      try {
+        existing = await pullRequestProvider.findExisting({
+          repository: accepted.repository,
+          issueNumber: issue.number,
+          issueTitle: assignedIssue.title,
+          headRef: accepted.workspaceBranch,
+          headCommit: accepted.headCommit,
+          baseRef: "main",
+        });
+      } catch (error) {
+        const failed = {
+          ...operation,
+          status: error instanceof GitHubPullRequestError &&
+            error.code === "GITHUB_CREDENTIAL_UNAVAILABLE" ? "failed" as const : "needs-inspection" as const,
+          reason: error instanceof GitHubPullRequestError && error.code === "GITHUB_CREDENTIAL_UNAVAILABLE"
+            ? "GitHub pull request credentials were unavailable."
+            : "Existing pull requests could not be proven absent or matching; inspect before creating one.",
+          updatedAt: new Date().toISOString(),
+        };
+        await updatePublicationPr(issue, failed);
+        return failed;
+      }
+      if (existing) {
+        const confirmed: PublicationPrOperation = {
+          ...operation,
+          status: "confirmed",
+          pullRequest: existing,
+          updatedAt: new Date().toISOString(),
+        };
+        await updatePublicationPr(issue, confirmed);
+        return confirmed;
+      }
+
+      const writing: PublicationPrOperation = {
+        ...operation,
+        status: "writing",
+        updatedAt: new Date().toISOString(),
+      };
+      activePublicationPrs.add(writing.operationId);
+      try {
+        await updatePublicationPr(issue, writing);
+        assertCurrent();
+        let created: GitHubPullRequest;
+        try {
+          created = await pullRequestProvider.create({
+            repository: accepted.repository,
+            issueNumber: issue.number,
+            issueTitle: assignedIssue.title,
+            headRef: accepted.workspaceBranch,
+            headCommit: accepted.headCommit,
+            baseRef: "main",
+            body,
+            beforeDispatch: assertCurrent,
+          });
+        } catch (error) {
+          const rejected = error instanceof GitHubPullRequestError &&
+            error.code === "GITHUB_PULL_REQUEST_CREATE_REJECTED";
+          const stopped: PublicationPrOperation = {
+            ...writing,
+            status: rejected ? "failed" : "needs-inspection",
+            reason: rejected
+              ? "GitHub definitively rejected draft pull request creation."
+              : "Draft pull request creation outcome is uncertain; inspect GitHub before retrying.",
+            updatedAt: new Date().toISOString(),
+          };
+          await updatePublicationPr(issue, stopped);
+          return stopped;
+        }
+        assertCurrent();
+        const confirmed: PublicationPrOperation = {
+          ...writing,
+          status: "confirmed",
+          pullRequest: created,
+          updatedAt: new Date().toISOString(),
+        };
+        await updatePublicationPr(issue, confirmed);
+        return confirmed;
+      } finally {
+        activePublicationPrs.delete(writing.operationId);
+      }
+    };
 
     const assertNoActiveCodingTasks = async (approvedRetryJobId?: string, resuming = false): Promise<void> => {
       let approvedRetryFound = false;
@@ -492,12 +762,14 @@ export default definePluginEntry({
         const job = jobValue;
         const approvedRetry = (job.status === "retry-approved" || (resuming && job.status === "waiting")) && job.jobId === approvedRetryJobId;
         const publicationPush = latestPublicationPush(job);
+        const publicationPr = latestPublicationPr(job);
         if (approvedRetry) approvedRetryFound = true;
         const blockingStatuses = resuming ? ["starting", "active", "needs-inspection", "retry-approved"]
           : ["starting", "active", "waiting", "needs-inspection", "retry-approved"];
         if ((!approvedRetry && blockingStatuses.includes(job.status)) ||
             (job.issueUpdate !== undefined && ["writing", "needs-inspection", "retry-approved", "abandoned"].includes(job.issueUpdate.status)) ||
-            (publicationPush !== undefined && ["writing", "needs-inspection", "retry-approved", "abandoned"].includes(publicationPush.status))) {
+            (publicationPush !== undefined && ["writing", "needs-inspection", "retry-approved", "abandoned"].includes(publicationPush.status)) ||
+            (publicationPr !== undefined && ["writing", "needs-inspection", "retry-approved", "abandoned"].includes(publicationPr.status))) {
           throw new Error("An Agent Crew coding task is active or uncertain; repository checkout is blocked.");
         }
       }
@@ -1216,7 +1488,19 @@ export default definePluginEntry({
             throw new Error("Publication request does not match the retained native coding session.");
           }
           const accepted = publicationAcceptance(retained);
+          const issue = { repository: retained.repository, number: retained.number };
           const previous = latestPublicationPush(retained);
+          const respondAfterConfirmedPush = async (job: Job, push: PublicationPushOperation) => {
+            const pullRequest = await ensurePublicationPr(
+              issue, accepted, job, () => sessionAccessAuthority.assertCurrent(),
+            );
+            respond(true, {
+              status: pullRequest.status,
+              publication: accepted,
+              push,
+              pullRequest,
+            });
+          };
           if (previous?.status === "writing") {
             if (activePublicationPushes.has(previous.operationId)) {
               throw new Error("Task branch publication is already in progress.");
@@ -1232,7 +1516,11 @@ export default definePluginEntry({
             return;
           }
           if (previous && previous.status !== "retry-approved") {
-            respond(true, { status: previous.status, publication: accepted, push: previous });
+            if (previous.status === "confirmed") {
+              await respondAfterConfirmedPush(retained, previous);
+            } else {
+              respond(true, { status: previous.status, publication: accepted, push: previous });
+            }
             return;
           }
           const operation: PublicationPushOperation = {
@@ -1306,8 +1594,12 @@ export default definePluginEntry({
                 ...operation,
                 reason: `Remote task branch has incompatible head ${remoteHead}.`,
               };
-            await updatePublicationPush(retained, matching);
-            respond(true, { status: matching.status, publication: accepted, push: matching });
+            const matchingJob = await updatePublicationPush(retained, matching);
+            if (matching.status === "confirmed") {
+              await respondAfterConfirmedPush(matchingJob, matching);
+            } else {
+              respond(true, { status: matching.status, publication: accepted, push: matching });
+            }
             return;
           }
           const writing: PublicationPushOperation = {
@@ -1361,8 +1653,8 @@ export default definePluginEntry({
               status: "confirmed",
               updatedAt: new Date().toISOString(),
             };
-            await updatePublicationPush(retained, confirmed);
-            respond(true, { status: confirmed.status, publication: accepted, push: confirmed });
+            const confirmedJob = await updatePublicationPush(retained, confirmed);
+            await respondAfterConfirmedPush(confirmedJob, confirmed);
           } finally {
             activePublicationPushes.delete(writing.operationId);
           }
@@ -1488,9 +1780,34 @@ export default definePluginEntry({
                   updatedAt: new Date().toISOString(),
                 };
               }))
+            : values.target === "publication-pr"
+              ? await serializePublication(async () => patchJob(issue, (existing) => {
+                const current = latestPublicationPr(existing);
+                if (!current || (current.status !== "needs-inspection" && current.status !== "failed") ||
+                    (values.decision !== "retry" && values.decision !== "abandon")) {
+                  throw new Error("publication pull request is not awaiting a valid operator decision");
+                }
+                const resolved: PublicationPrOperation = {
+                  ...current,
+                  status: values.decision === "retry" ? "retry-approved" : "abandoned",
+                  decision: `${values.decision}: ${note}`,
+                  updatedAt: new Date().toISOString(),
+                };
+                return {
+                  ...existing,
+                  publication: {
+                    pushOperations: existing.publication!.pushOperations,
+                    prOperations: [
+                      ...existing.publication!.prOperations!.slice(0, -1),
+                      resolved,
+                    ],
+                  },
+                  updatedAt: new Date().toISOString(),
+                };
+              }))
             : await serialize(() => patchJob(issue, (existing) => {
             if (values.target !== undefined && values.target !== "workflow") {
-              throw new Error("target must be workflow, issue-update or publication-push");
+              throw new Error("target must be workflow, issue-update, publication-push or publication-pr");
             }
             if ((values.decision !== "retry" && values.decision !== "abandon") || !existing || existing.status !== "needs-inspection") {
               throw new Error("workflow is not awaiting a valid operator decision");

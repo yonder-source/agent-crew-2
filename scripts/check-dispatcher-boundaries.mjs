@@ -38,6 +38,13 @@ const context = createContext({ authorizesSlackTaskReply, isReplyAfterSlackConne
     async updateIssueBody() { await updateGate; if (updateFailure) throw updateFailure; return { body: "Changed" }; }
     async readIssue(repository, number) { return { repository, number, title: "Issue", body: "Body", state: "open", labels: [] }; }
   },
+  GitHubPullRequestError: class GitHubPullRequestError extends Error {
+    constructor(code, message) { super(message); this.code = code; }
+  },
+  OctokitGitHubPullRequestProvider: class {
+    async findExisting() { return undefined; }
+    async create() { throw new Error("Synthetic dispatcher must not create a pull request"); }
+  },
   IssueDiscovery: class {},
   parseConfig: () => ({ environment: "test", github: { repository: "owner/repo", pollIntervalMs: 60_000 } }), definePluginEntry: (entry) => entry,
   callGatewayFromCli: async (method, _options, params) => {

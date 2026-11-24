@@ -438,6 +438,9 @@ pre-write intent and confirmed/failed/inspection outcomes. Unacknowledged writes
 and unfinished intent markers require operator inspection across restart, not
 automatic replay. A definitively rejected operation with no remote effect can be
 failed; ambiguous responses and conflicts must not be assumed side-effect-free.
+PR creation obtains a fresh repository-scoped pull-requests-write token; the
+Controller reuses an exact retained open draft rather than issuing another
+create request.
 PR creation uses base `main`, the assigned issue title, bounded coding/validation
 summaries and `Fixes #<issue-number>`. Reuse an existing open draft only when its
 repository, issue association, head branch/SHA and base match the delivery.
