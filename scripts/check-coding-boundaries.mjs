@@ -1,6 +1,6 @@
 import { authorizesSlackTaskReply, isReplyAfterSlackConnection, parseSlackTaskReply } from "../dist/slack-task-reply.js";
 import { isSlackTaskThread } from "../dist/slack-task-thread.js";
-import { TaskBaseError } from "../dist/repository-clone.js";
+import { TaskBaseError, TaskPushError } from "../dist/repository-clone.js";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -13,6 +13,7 @@ import { codingPrompt } from "../dist/coding-prompt.js";
 import { draftSlackSettings } from "../dist/slack-settings.js";
 import { slackCredentialStatus } from "../dist/slack-credentials.js";
 import { normalizeCodingValidation, isCodingDelivery, normalizeCodingUsage, isCodingUsage, addCodingUsage, parseTokenBudget } from "../dist/coding-result.js";
+import { pullRequestUrlMatches } from "../dist/github-pulls.js";
 
 const source = readFileSync("dist/index.js", "utf8")
   .replace(/^import .*;\n/gm, "")
@@ -47,6 +48,11 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
   let codingText = "Changed README; validation passed";
   let codingValidation = { status: "ok", checks: [{ command: "npm test", outcome: "ok", exitCode: 0 }] };
   let deliveryFailure = false;
+  let publicationVerificationFailure = false;
+  let remoteTaskHead;
+  let taskPushFailure;
+  let pullRequestMode;
+  let publicationSessionId = "native-session-7";
   let failConfigPatch = false;
   let inventory = { sessions: [] };
   const setupDraft = { githubAppId: "123", repository: "owner/repo", installationId: "17", repositoryPath,
@@ -68,7 +74,7 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
       if (slackMessages.length === failSlackAt) throw new Error("secret-provider-error");
       return `100.${String(slackMessages.length).padStart(6, "0")}`;
     }, performance: { now: () => clock },
-    TaskBaseError, createHash, randomUUID, codingPrompt, normalizeCodingValidation, isCodingDelivery, normalizeCodingUsage, isCodingUsage, addCodingUsage, parseTokenBudget, slackCredentialStatus, draftSlackSettings,
+    TaskBaseError, createHash, randomUUID, codingPrompt, normalizeCodingValidation, isCodingDelivery, normalizeCodingUsage, isCodingUsage, addCodingUsage, parseTokenBudget, slackCredentialStatus, draftSlackSettings, pullRequestUrlMatches,
     validateSlackSettings: async (settings) => Object.keys(settings).map(role => ({ id: `${role}-slack`, status: "passed", message: "Fixture verified" })),
     readFile: async () => "fixture-token",
     prepareTaskBase: async () => "a".repeat(40),
@@ -78,13 +84,79 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
       if (deliveryFailure) throw new Error("Dirty or mismatched worktree");
       return "b".repeat(40);
     },
+    verifyTaskPublication: async (options) => {
+      calls.push({ method: "verify-publication", params: options });
+      if (publicationVerificationFailure) throw new Error("Publication worktree verification failed");
+    },
+    inspectTaskRemoteHead: async (options) => {
+      calls.push({ method: "inspect-remote-branch", params: options });
+      return remoteTaskHead;
+    },
+    pushTaskBranch: async (options) => {
+      const retained = session.pluginExtensions[0].value.publication.pushOperations.at(-1);
+      assert.equal(retained.status, "writing", "A durable writing marker must precede the Git push");
+      calls.push({ method: "push-task-branch", params: options });
+      if (taskPushFailure) throw new TaskPushError(taskPushFailure, "Fixture push failure");
+      remoteTaskHead = options.expectedHead;
+    },
+    TaskPushError,
     process: { env: { AGENT_CREW_GATEWAY_TOKEN: "test" } },
     assignedIssueFromSession, trustedSessionKey,
     connectionConfig,
     GitHubAppError,
     GitHubAppClient: class {
       async installationTokenForRepository() { return "fixture-token"; }
+      async publicationTokenForRepository() { return "fixture-publication-token"; }
+      async pullRequestTokenForRepository() { return "fixture-pull-request-token"; }
       async repositoryAccess() { return { permissions: { contents: "write", issues: "write", pull_requests: "write" } }; }
+    },
+    GitHubPullRequestError: class GitHubPullRequestError extends Error {
+      constructor(code, message) { super(message); this.code = code; }
+    },
+    OctokitGitHubPullRequestProvider: class {
+      async findExisting(options) {
+        const retained = session.pluginExtensions[0].value.publication.prOperations.at(-1);
+        assert.ok(["needs-inspection", "confirmed"].includes(retained.status),
+          "A retained PR lookup boundary must exist before external PR inspection");
+        calls.push({ method: "pull-request-lookup", params: options });
+        if (pullRequestMode === "lookup-uncertain") {
+          throw new Error("Fixture lookup transport failed");
+        }
+        if (pullRequestMode === "lookup-mismatch") {
+          throw new context.GitHubPullRequestError("GITHUB_PULL_REQUEST_MISMATCH", "Fixture mismatch");
+        }
+        if (pullRequestMode === "existing" || pullRequestMode === "created") return {
+          repository: options.repository, id: 123, number: 77,
+          url: `https://github.com/${options.repository}/pull/77`,
+          title: options.issueTitle, body: "Fixture existing draft\n\nFixes #7",
+          state: "open", draft: true, merged: false,
+          baseRef: options.baseRef, headRef: options.headRef, headCommit: options.headCommit,
+        };
+        const confirmed = session.pluginExtensions[0].value.publication.prOperations.at(-1);
+        if (pullRequestMode !== "missing" && confirmed?.status === "confirmed") {
+          return confirmed.pullRequest;
+        }
+        return undefined;
+      }
+      async create(options) {
+        const retained = session.pluginExtensions[0].value.publication.prOperations.at(-1);
+        assert.equal(retained.status, "writing",
+          "A durable writing marker must precede draft PR creation");
+        calls.push({ method: "pull-request-create", params: options });
+        if (pullRequestMode === "create-rejected") {
+          throw new context.GitHubPullRequestError("GITHUB_PULL_REQUEST_CREATE_REJECTED", "Fixture rejected");
+        }
+        if (pullRequestMode === "create-uncertain") {
+          throw new context.GitHubPullRequestError("GITHUB_PULL_REQUEST_CREATE_UNCERTAIN", "Fixture uncertain");
+        }
+        return {
+          repository: options.repository, id: 124, number: 78,
+          url: `https://github.com/${options.repository}/pull/78`,
+          title: options.issueTitle, body: options.body,
+          state: "open", draft: true, merged: false,
+          baseRef: options.baseRef, headRef: options.headRef, headCommit: options.headCommit,
+        };
+      }
     },
     validateCheckout: async () => ({ id: "checkout", status: "passed", message: "Fixture remote matches" }),
     cloneRepository: async (options) => { calls.push({ method: "clone", params: options }); return { status: "cloned" }; },
@@ -141,6 +213,25 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
         return {};
       }
       if (method === "tools.invoke") {
+        if (params.args.pipeline === "workflows/publication-issue.lobster") {
+          let publicationAnswer;
+          await methods.get("agent-crew.publication.accept").handler({
+            params: {},
+            sessionAccessAuthority: {
+              target: {
+                agentId: "coding",
+                sessionKey: JSON.parse(params.args.argsJson).sessionKey,
+                sessionId: publicationSessionId,
+              },
+              assertCurrent() {},
+            },
+            respond(ok, value, error) { publicationAnswer = { ok, value, error }; },
+          });
+          assert.equal(publicationAnswer.ok, true, "Publication workflow must see the retained completed delivery");
+          return { ok: true, output: { details: {
+            ok: true, status: "ok", output: [publicationAnswer.value],
+          } } };
+        }
         if (retainedQuestion) session.pluginExtensions[0].value.inputRequest = retainedQuestion;
         if (heldRun) await heldRun;
         clock += turnMs;
@@ -170,6 +261,12 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
     let answer;
     await methods.get(name).handler({
       params,
+      ...(name === "agent-crew.publication.accept" ? {
+        sessionAccessAuthority: {
+          target: { agentId: "coding", sessionKey: params.sessionKey, sessionId: publicationSessionId },
+          assertCurrent() {},
+        },
+      } : {}),
       respond(ok, value, error) { answer = { ok, value, error }; },
     });
     return answer;
@@ -201,6 +298,12 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
     setValidation(value) { codingValidation = value; },
     setUsage(value) { codingUsage = value; },
     failDelivery() { deliveryFailure = true; },
+    failPublicationVerification() { publicationVerificationFailure = true; },
+    setRemoteTaskHead(value) { remoteTaskHead = value; },
+    failTaskPush(code) { taskPushFailure = code; },
+    allowTaskPush() { taskPushFailure = undefined; },
+    setPullRequestMode(value) { pullRequestMode = value; },
+    setPublicationSessionId(value) { publicationSessionId = value; },
     requestInput(value, active = false) { requestInput = value; hasActiveRun = active; },
     setStoppedRun(value) { stoppedRunId = value; },
     setRunId(value) { runId = value; stoppedRunId = value; },
@@ -222,13 +325,78 @@ assert.equal(first.value.job.codingRunStatus, "ok");
 assert.equal(first.value.job.workspacePath, workspacePath);
 assert.equal(first.value.job.workspaceBranch, branch);
 assert.equal(first.value.job.baseCommit, "a".repeat(40));
+assert.equal(success.calls.filter(call =>
+  call.method === "tools.invoke" && call.params.args.pipeline === "workflows/publication-issue.lobster").length, 1,
+"The trusted publication workflow must run after the completed delivery is retained");
+assert.equal(success.session().pluginExtensions[0].value.codingSessionId, "native-session-7",
+  "Completed coding deliveries must retain their native session identity");
 assert.equal(first.value.job.codingDelivery.headCommit, "b".repeat(40));
 assert.equal(first.value.job.codingDelivery.status, "ready");
+const acceptedPublication = await success.method("agent-crew.publication.accept", {
+  sessionKey: first.value.job.sessionKey, jobId: "caller-supplied-job", headCommit: "c".repeat(40),
+});
+assert.equal(acceptedPublication.ok, true);
+assert.equal(acceptedPublication.value.status, "published", JSON.stringify(acceptedPublication.value));
+assert.deepEqual(JSON.parse(JSON.stringify(acceptedPublication.value)), {
+  repository: "owner/repo",
+  issueNumber: 7,
+  status: "published",
+  branch,
+  headCommit: "b".repeat(40),
+  validation: { status: "ok" },
+  pullRequest: {
+    number: 78,
+    url: "https://github.com/owner/repo/pull/78",
+    state: "open",
+    draft: true,
+  },
+});
+assert.equal(JSON.stringify(acceptedPublication.value).includes("operationId"), false);
+assert.equal(JSON.stringify(acceptedPublication.value).includes("titleHash"), false);
+assert.equal(JSON.stringify(acceptedPublication.value).includes("bodyHash"), false);
+assert.equal(success.session().pluginExtensions[0].value.publication.pushOperations.at(-1).status, "confirmed");
+assert.equal(success.session().pluginExtensions[0].value.publication.prOperations.at(-1).status, "confirmed");
+assert.match(success.session().pluginExtensions[0].value.publication.prOperations.at(-1).pullRequest.body, /Fixes #7/);
+assert.deepEqual(JSON.parse(JSON.stringify(first.value.job.publication)),
+  JSON.parse(JSON.stringify(acceptedPublication.value)));
+const publishedStatus = (await success.status()).details.job.publication;
+assert.deepEqual(JSON.parse(JSON.stringify(publishedStatus)),
+  JSON.parse(JSON.stringify(acceptedPublication.value)));
+assert.equal(JSON.stringify(publishedStatus).includes("fixture-token"), false);
+assert.equal(JSON.stringify(publishedStatus).includes("operationId"), false);
+assert.equal(success.calls.find(call => call.method === "verify-publication")
+  .params.expectedHead, "b".repeat(40));
+assert.equal(success.calls.filter(call => call.method === "push-task-branch").length, 1);
+assert.equal(success.calls.find(call => call.method === "push-task-branch")
+  .params.token, "fixture-token");
+assert.equal(success.calls.filter(call => call.method === "pull-request-lookup").length, 2,
+  "The direct publication call revalidates the remote PR without recreating it");
+assert.equal(success.calls.filter(call => call.method === "pull-request-create").length, 1);
+assert.equal((await success.method("agent-crew.publication.accept", {
+  sessionKey: "agent:coding:other",
+})).ok, false);
+const unboundPublication = await harness().method("agent-crew.publication.accept", {
+  sessionKey: first.value.job.sessionKey,
+});
+assert.equal(unboundPublication.ok, false);
+success.setPublicationSessionId("native-session-recreated");
+assert.equal((await success.method("agent-crew.publication.accept", {
+  sessionKey: first.value.job.sessionKey,
+})).ok, false, "A recreated coding session with the same key must not authorize publication");
+success.setPublicationSessionId("native-session-7");
+const missingNativeSession = structuredClone(success.session());
+delete missingNativeSession.pluginExtensions[0].value.codingSessionId;
+assert.equal((await harness(missingNativeSession).method("agent-crew.publication.accept", {
+  sessionKey: first.value.job.sessionKey,
+})).ok, false, "Legacy delivery without native session identity must not be guessed");
 assert.equal(success.calls.find(call => call.method === "verify-delivery").params.baseCommit, "a".repeat(40));
 const restarted = harness(success.session());
 assert.deepEqual((await restarted.status()).details.job.codingDelivery, first.value.job.codingDelivery);
 assert.equal((await restarted.method("agent-crew.dispatch", issue)).value.job.jobId, first.value.job.jobId);
-assert.equal(restarted.calls.some(call => call.method === "tools.invoke"), false);
+assert.equal(restarted.calls.filter(call => call.method === "tools.invoke" &&
+  call.params.args.pipeline === "workflows/coding-issue.lobster").length, 0);
+assert.equal(restarted.calls.filter(call => call.method === "tools.invoke" &&
+  call.params.args.pipeline === "workflows/publication-issue.lobster").length, 1);
 assert.match(first.value.job.sessionKey, /^agent:coding:/);
 const invocation = success.calls.find((call) => call.method === "tools.invoke");
 assert.equal(invocation.params.sessionKey, "agent:main:main");
@@ -248,7 +416,28 @@ assert.equal(JSON.parse(conflictPrompt.split("\n\n")[1]).branch, branch);
 assert.match(conflictPrompt, /untrustedIssue/);
 assert.match(conflictPrompt, /Do not commit, push, publish/);
 assert.equal((await success.method("agent-crew.dispatch", issue)).value.job.jobId, first.value.job.jobId);
-assert.equal(success.calls.filter((call) => call.method === "tools.invoke").length, 1);
+assert.equal(success.calls.filter(call => call.method === "tools.invoke" &&
+  call.params.args.pipeline === "workflows/coding-issue.lobster").length, 1);
+assert.equal((await success.method("agent-crew.publication.accept", {
+  sessionKey: first.value.job.sessionKey,
+})).value.status, "published");
+assert.equal(success.calls.filter(call => call.method === "push-task-branch").length, 1,
+  "Repeated publication must not replay a confirmed push");
+assert.equal(success.calls.filter(call => call.method === "pull-request-create").length, 1,
+  "Repeated publication must not duplicate a confirmed draft PR");
+const remoteIdentityLost = harness(structuredClone(success.session()));
+const confirmedLookup = remoteIdentityLost.method("agent-crew.publication.accept", {
+  sessionKey: first.value.job.sessionKey,
+});
+assert.equal((await confirmedLookup).value.status, "published");
+remoteIdentityLost.setPullRequestMode("missing");
+const missingRemoteDraft = await remoteIdentityLost.method("agent-crew.publication.accept", {
+  sessionKey: first.value.job.sessionKey,
+});
+assert.equal(missingRemoteDraft.value.status, "needs-inspection");
+assert.equal(missingRemoteDraft.value.pullRequest, undefined);
+assert.equal(remoteIdentityLost.calls.filter(call => call.method === "pull-request-create").length, 0,
+  "Remote PR revalidation failure must never blindly create a replacement");
 
 const failed = harness();
 failed.setCoding("error", "Coding failed");
@@ -257,6 +446,9 @@ assert.equal(failure.ok, true);
 assert.equal(failure.value.job.status, "needs-inspection");
 assert.equal(failure.value.job.codingRunStatus, "error");
 assert.equal(failure.value.job.codingSummary, "Coding failed");
+assert.equal((await failed.method("agent-crew.publication.accept", {
+  sessionKey: failure.value.job.sessionKey,
+})).ok, false);
 assert.equal((await failed.method("agent-crew.dispatch", issue)).value.job.jobId, failure.value.job.jobId);
 assert.equal(failed.calls.filter((call) => call.method === "tools.invoke").length, 1);
 for (const validation of [undefined, { status: "ok", checks: [] },
@@ -277,6 +469,162 @@ assert.equal(dirtyJob.codingRunId, "run-7");
 assert.equal(dirtyJob.codingDelivery.validation.status, "ok");
 assert.equal(dirtyJob.codingDelivery.headCommit, undefined);
 assert.equal(dirtyJob.codingDelivery.reason, "worktree-unverified");
+assert.equal((await dirty.method("agent-crew.publication.accept", {
+  sessionKey: dirtyJob.sessionKey,
+})).ok, false);
+assert.deepEqual((await dirty.status()).details.job.codingDelivery, dirtyJob.codingDelivery);
+
+const blockedPublication = harness();
+blockedPublication.failPublicationVerification();
+const blockedJob = (await blockedPublication.method("agent-crew.dispatch", issue)).value.job;
+const blockedPush = await blockedPublication.method("agent-crew.publication.accept", {
+  sessionKey: blockedJob.sessionKey,
+});
+assert.equal(blockedPush.value.status, "needs-inspection");
+assert.match(blockedPush.value.inspectionReason, /Worktree/);
+assert.equal(blockedPush.value.pullRequest, undefined);
+assert.equal(blockedPublication.calls.filter(call => call.method === "push-task-branch").length, 0);
+
+const matchingRemote = harness();
+matchingRemote.setRemoteTaskHead("b".repeat(40));
+const matchingJob = (await matchingRemote.method("agent-crew.dispatch", issue)).value.job;
+const alreadyPresent = await matchingRemote.method("agent-crew.publication.accept", {
+  sessionKey: matchingJob.sessionKey,
+});
+assert.equal(alreadyPresent.value.status, "published");
+assert.equal(matchingRemote.calls.filter(call => call.method === "push-task-branch").length, 0,
+  "An exact existing remote head is confirmed without another push");
+
+const incompatibleRemote = harness();
+incompatibleRemote.setRemoteTaskHead("c".repeat(40));
+const incompatibleJob = (await incompatibleRemote.method("agent-crew.dispatch", issue)).value.job;
+const incompatiblePush = await incompatibleRemote.method("agent-crew.publication.accept", {
+  sessionKey: incompatibleJob.sessionKey,
+});
+assert.equal(incompatiblePush.value.status, "needs-inspection");
+assert.match(incompatiblePush.value.inspectionReason, /incompatible head/);
+assert.equal(incompatibleRemote.calls.filter(call => call.method === "push-task-branch").length, 0);
+
+const uncertainPublication = harness();
+uncertainPublication.failTaskPush("PUSH_UNCERTAIN");
+const uncertainJob = (await uncertainPublication.method("agent-crew.dispatch", issue)).value.job;
+const uncertainPush = await uncertainPublication.method("agent-crew.publication.accept", {
+  sessionKey: uncertainJob.sessionKey,
+});
+assert.equal(uncertainPush.value.status, "needs-inspection");
+assert.equal(uncertainPush.value.pullRequest, undefined);
+assert.equal((await uncertainPublication.method("agent-crew.publication.accept", {
+  sessionKey: uncertainJob.sessionKey,
+})).value.status, "needs-inspection");
+assert.equal(uncertainPublication.calls.filter(call => call.method === "push-task-branch").length, 1,
+  "Uncertain pushes must not replay automatically");
+const approvedPushRetry = await uncertainPublication.method("agent-crew.resolve", {
+  ...issue, target: "publication-push", decision: "retry", note: "Remote branch inspected and push may be retried",
+});
+assert.equal(approvedPushRetry.ok, true);
+assert.equal(uncertainPublication.session().pluginExtensions[0].value.publication.pushOperations.at(-1).status,
+  "retry-approved");
+uncertainPublication.allowTaskPush();
+const retriedPush = await uncertainPublication.method("agent-crew.publication.accept", {
+  sessionKey: uncertainJob.sessionKey,
+});
+assert.equal(retriedPush.value.status, "published");
+assert.equal(uncertainPublication.session().pluginExtensions[0].value.publication.pushOperations.at(-1).operationId
+  !== uncertainPublication.session().pluginExtensions[0].value.publication.pushOperations.at(-2).operationId, true);
+assert.equal(uncertainPublication.session().pluginExtensions[0].value.publication.pushOperations.length, 2);
+
+const rejectedPublication = harness();
+rejectedPublication.failTaskPush("PUSH_REJECTED");
+const rejectedJob = (await rejectedPublication.method("agent-crew.dispatch", issue)).value.job;
+const rejectedPush = await rejectedPublication.method("agent-crew.publication.accept", {
+  sessionKey: rejectedJob.sessionKey,
+});
+assert.equal(rejectedPush.value.status, "failed");
+assert.equal(rejectedPush.value.pullRequest, undefined);
+assert.match(rejectedPush.value.inspectionReason, /rejected/);
+
+const existingDraft = harness();
+existingDraft.setPullRequestMode("existing");
+const existingDraftJob = (await existingDraft.method("agent-crew.dispatch", issue)).value.job;
+assert.equal(existingDraftJob.publication.status, "published");
+assert.equal(existingDraftJob.publication.pullRequest.number, 77);
+assert.equal(existingDraft.calls.filter(call => call.method === "pull-request-create").length, 0);
+
+const mismatchedDraft = harness();
+mismatchedDraft.setPullRequestMode("lookup-mismatch");
+const mismatchedDraftJob = (await mismatchedDraft.method("agent-crew.dispatch", issue)).value.job;
+assert.equal(mismatchedDraftJob.publication.status, "needs-inspection");
+assert.equal(mismatchedDraftJob.publication.pullRequest, undefined);
+assert.equal(mismatchedDraft.calls.filter(call => call.method === "pull-request-create").length, 0);
+
+const uncertainDraft = harness();
+uncertainDraft.setPullRequestMode("create-uncertain");
+const uncertainDraftJob = (await uncertainDraft.method("agent-crew.dispatch", issue)).value.job;
+const uncertainDraftOperation =
+  uncertainDraft.session().pluginExtensions[0].value.publication.prOperations.at(-1);
+assert.equal(uncertainDraftOperation.status, "needs-inspection");
+assert.equal((await uncertainDraft.method("agent-crew.publication.accept", {
+  sessionKey: uncertainDraftJob.sessionKey,
+})).value.status, "needs-inspection");
+assert.equal(uncertainDraft.calls.filter(call => call.method === "pull-request-create").length, 1,
+  "An uncertain PR create must not replay automatically");
+assert.equal((await uncertainDraft.method("agent-crew.resolve", {
+  ...issue, target: "publication-pr", decision: "retry",
+  note: "GitHub inspected; no draft was created",
+})).ok, true);
+uncertainDraft.setPullRequestMode();
+const retriedDraft = (await uncertainDraft.method("agent-crew.publication.accept", {
+  sessionKey: uncertainDraftJob.sessionKey,
+})).value;
+assert.equal(retriedDraft.status, "published");
+assert.notEqual(uncertainDraft.session().pluginExtensions[0].value.publication.prOperations.at(-1).operationId,
+  uncertainDraftOperation.operationId);
+assert.equal(uncertainDraft.session().pluginExtensions[0].value.publication.prOperations.length, 2);
+
+const rejectedDraft = harness();
+rejectedDraft.setPullRequestMode("create-rejected");
+const rejectedDraftJob = (await rejectedDraft.method("agent-crew.dispatch", issue)).value.job;
+assert.equal(rejectedDraftJob.publication.status, "failed");
+assert.equal(rejectedDraftJob.publication.pullRequest, undefined);
+assert.match(rejectedDraftJob.publication.inspectionReason, /rejected/);
+
+const abandonedDraft = harness();
+abandonedDraft.setPullRequestMode("create-uncertain");
+const abandonedDraftJob = (await abandonedDraft.method("agent-crew.dispatch", issue)).value.job;
+assert.equal((await abandonedDraft.method("agent-crew.resolve", {
+  ...issue, target: "publication-pr", decision: "abandon",
+  note: "Operator chose not to publish this draft",
+})).ok, true);
+const abandonedResult = (await abandonedDraft.method("agent-crew.publication.accept", {
+  sessionKey: abandonedDraftJob.sessionKey,
+})).value;
+assert.equal(abandonedResult.status, "abandoned");
+assert.equal(abandonedResult.pullRequest, undefined);
+assert.equal(abandonedDraft.calls.filter(call => call.method === "pull-request-create").length, 1);
+
+const interruptedPushSnapshot = structuredClone(success.session());
+const interruptedPush = interruptedPushSnapshot.pluginExtensions[0].value.publication.pushOperations.at(-1);
+interruptedPush.status = "writing";
+interruptedPush.reason = undefined;
+const interruptedPushRestart = harness(interruptedPushSnapshot);
+const interruptedResult = await interruptedPushRestart.method("agent-crew.publication.accept", {
+  sessionKey: first.value.job.sessionKey,
+});
+assert.equal(interruptedResult.value.status, "needs-inspection");
+assert.match(interruptedResult.value.inspectionReason, /Gateway stopped/);
+assert.equal(interruptedPushRestart.calls.filter(call => call.method === "push-task-branch").length, 0);
+
+const interruptedPrSnapshot = structuredClone(success.session());
+const interruptedPr = interruptedPrSnapshot.pluginExtensions[0].value.publication.prOperations.at(-1);
+interruptedPr.status = "writing";
+delete interruptedPr.pullRequest;
+const interruptedPrRestart = harness(interruptedPrSnapshot);
+const interruptedPrResult = await interruptedPrRestart.method("agent-crew.publication.accept", {
+  sessionKey: first.value.job.sessionKey,
+});
+assert.equal(interruptedPrResult.value.status, "needs-inspection");
+assert.match(interruptedPrResult.value.inspectionReason, /Gateway stopped/);
+assert.equal(interruptedPrRestart.calls.filter(call => call.method === "pull-request-create").length, 0);
 
 const orphan = harness({
   sessionRoot: workspacePath, sessionId: "native-session-7",
@@ -424,7 +772,8 @@ const resumedArgs = JSON.parse(waitingRestart.calls.find(call => call.method ===
 assert.equal(resumedArgs.timeoutSeconds, "1198");
 assert.ok(resumedArgs.prompt.includes("Use the smaller change."));
 assert.equal((await waitingRestart.method("agent-crew.resume", resumeParams)).ok, false);
-assert.equal(waitingRestart.calls.filter(call => call.method === "tools.invoke").length, 1);
+assert.equal(waitingRestart.calls.filter(call => call.method === "tools.invoke" &&
+  call.params.args.pipeline === "workflows/coding-issue.lobster").length, 1);
 
 const concurrentResume = harness(structuredClone(waitingSnapshot));
 concurrentResume.setInventory({ sessions: [{ key: waited.value.job.sessionKey, hasActiveRun: false }] });
@@ -435,7 +784,8 @@ assert.equal(busy.ok, false);
 assert.match(busy.error.message, /busy/);
 concurrentResume.releaseRun();
 assert.equal((await resumeInFlight).ok, true);
-assert.equal(concurrentResume.calls.filter(call => call.method === "tools.invoke").length, 1);
+assert.equal(concurrentResume.calls.filter(call => call.method === "tools.invoke" &&
+  call.params.args.pipeline === "workflows/coding-issue.lobster").length, 1);
 
 for (const mutate of [
   job => { job.activeMs = 1_200_000; },
@@ -561,9 +911,12 @@ assert.match(secondReply.text, /busy/);
 inbound.releaseRun();
 await new Promise(resolve => setTimeout(resolve, 0));
 assert.equal(inbound.session().pluginExtensions[0].value.status, "completed");
-assert.equal(inbound.calls.filter(call => call.method === "tools.invoke").length, 1);
+assert.equal(inbound.calls.filter(call => call.method === "tools.invoke" &&
+  call.params.args.pipeline === "workflows/coding-issue.lobster").length, 1);
 await inbound.inbound(slackEvent, slackContext);
-assert.equal(inbound.calls.filter(call => call.method === "tools.invoke").length, 1, "Slack event redelivery must not repeat execution");
+assert.equal(inbound.calls.filter(call => call.method === "tools.invoke" &&
+  call.params.args.pipeline === "workflows/coding-issue.lobster").length, 1,
+"Slack event redelivery must not repeat execution");
 
 for (const [event, context] of [
   [{ ...slackEvent, senderId: "U999" }, { ...slackContext, senderId: "U999" }],

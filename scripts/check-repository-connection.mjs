@@ -5,7 +5,10 @@ import { chmod, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GitHubAppClient } from "../dist/github-app.js";
-import { cloneRepository, prepareTaskBase, verifyTaskWorkspace, verifyTaskDelivery, commitTaskDelivery } from "../dist/repository-clone.js";
+import {
+  cloneRepository, prepareTaskBase, verifyTaskWorkspace, verifyTaskDelivery, commitTaskDelivery,
+  inspectTaskRemoteHead, pushTaskBranch, TaskPushError,
+} from "../dist/repository-clone.js";
 import { validateCheckout } from "../dist/repository-validation.js";
 import { parseConfig } from "../dist/config.mjs";
 import { GitHubIssueError, OctokitGitHubIssueProvider } from "../dist/github-issues.js";
@@ -30,6 +33,10 @@ assert.deepEqual(await client.listAccessibleRepositories("123"), [
 ]);
 assert.equal(await client.installationTokenForRepository("123", 17, "owner/repo"), "fixture-token");
 assert.deepEqual(requests.at(-1).body, { repository_ids: [23], permissions: { contents: "read" } });
+assert.equal(await client.publicationTokenForRepository("123", 17, "owner/repo"), "fixture-token");
+assert.deepEqual(requests.at(-1).body, { repository_ids: [23], permissions: { contents: "write" } });
+assert.equal(await client.pullRequestTokenForRepository("123", 17, "owner/repo"), "fixture-token");
+assert.deepEqual(requests.at(-1).body, { repository_ids: [23], permissions: { pull_requests: "write" } });
 const requestsBeforeIssue = requests.length;
 assert.equal(await client.issueTokenForRepository("123", 17, "owner/repo"), "fixture-token");
 assert.deepEqual(requests.at(-1).body, { repository_ids: [23], permissions: { issues: "write" } });
@@ -201,11 +208,19 @@ try {
   const expected = gitFixture(seed, "rev-parse", "HEAD");
   const bin = join(taskRoot, "bin");
   await mkdir(bin);
+  const gitGlobalConfig = join(bin, "global.gitconfig");
+  await writeFile(gitGlobalConfig,
+    `[url "${remote}"]\n\tinsteadOf = https://github.com/owner/repo.git\n\tpushInsteadOf = https://github.com/owner/repo.git\n`);
   const wrapper = join(bin, "git");
   await writeFile(wrapper, `#!${process.execPath}\nconst {spawnSync}=require('node:child_process');
 const args=process.argv.slice(2);const f=args.indexOf('fetch');
 if(f>=0){const o=args.indexOf('origin',f);if(o>=0)args[o]=${JSON.stringify(remote)};}
-const r=spawnSync('/usr/bin/git',args,{stdio:'inherit'});process.exit(r.status??1);\n`);
+const inspectOrigin=args.includes('remote')&&args.includes('get-url')&&args.includes('origin');
+const r=spawnSync('/usr/bin/git',args,{stdio:'inherit',env:{
+  ...process.env,
+  GIT_CONFIG_NOSYSTEM:'1',
+  GIT_CONFIG_GLOBAL:inspectOrigin?'/dev/null':${JSON.stringify(gitGlobalConfig)},
+}});process.exit(r.status??1);\n`);
   await chmod(wrapper, 0o700);
   process.env.PATH = `${bin}:${originalPath ?? "/usr/bin:/bin"}`;
   const options = { repository: "owner/repo", repositoryPath: source,
@@ -293,6 +308,43 @@ const r=spawnSync('/usr/bin/git',args,{stdio:'inherit'});process.exit(r.status??
   assert.equal(await verifyTaskDelivery(delivery), taskHead, "Remote main advancing must not invalidate a bound delivery");
   await assert.rejects(prepareTaskBase(next), /ahead of or divergent/);
   assert.equal(gitFixture(source, "rev-parse", "HEAD"), localHead);
+  gitFixture(workspacePath, "remote", "set-url", "origin", remote);
+  const publication = {
+    repository: "owner/repo", token: "fixture-token", workspacePath,
+    branch: options.branch, expectedHead: taskHead,
+  };
+  const wrongRemote = join(taskRoot, "wrong-remote.git");
+  gitFixture(taskRoot, "init", "--bare", "--initial-branch=main", wrongRemote);
+  gitFixture(workspacePath, "remote", "set-url", "--push", "origin", wrongRemote);
+  gitFixture(workspacePath, "config", `url.${wrongRemote}.pushInsteadOf`, "https://github.com/owner/repo.git");
+  assert.equal(await inspectTaskRemoteHead(publication), undefined);
+  await pushTaskBranch(publication);
+  assert.equal(await inspectTaskRemoteHead(publication), taskHead,
+    "Push must bypass any independently configured origin pushurl");
+  const wrongRemoteHead = spawnSync("/usr/bin/git", [
+    "--git-dir", wrongRemote, "rev-parse", "--verify", `refs/heads/${options.branch}`,
+  ], { encoding: "utf8" });
+  assert.notEqual(wrongRemoteHead.status, 0, "The origin pushurl must receive no publication write");
+  gitFixture(seed, "push", remote, `:refs/heads/${options.branch}`);
+  assert.equal(await inspectTaskRemoteHead(publication), undefined);
+  gitFixture(seed, "push", remote, `${baseCommit}:refs/heads/${options.branch}`);
+  await assert.rejects(pushTaskBranch(publication), (error) =>
+    error instanceof TaskPushError && error.code === "REMOTE_BRANCH_MISMATCH");
+  assert.equal(await inspectTaskRemoteHead(publication), baseCommit,
+    "A competing ref creation must not be fast-forwarded");
+  gitFixture(seed, "push", remote, `:refs/heads/${options.branch}`);
+  await pushTaskBranch(publication);
+  assert.equal(await inspectTaskRemoteHead(publication), taskHead);
+  gitFixture(seed, "switch", "-c", "competing-publication", baseCommit);
+  await writeFile(join(seed, "COMPETING.md"), "competing publication\n");
+  gitFixture(seed, "add", ".");
+  gitFixture(seed, "commit", "-m", "competing publication");
+  const competingHead = gitFixture(seed, "rev-parse", "HEAD");
+  gitFixture(seed, "push", "--force", "origin", `${competingHead}:refs/heads/${options.branch}`);
+  await assert.rejects(pushTaskBranch({
+    ...publication, previousRemoteHead: competingHead,
+  }), (error) => error instanceof TaskPushError && error.code === "PUSH_REJECTED");
+  assert.equal(await inspectTaskRemoteHead(publication), competingHead);
 } finally {
   if (originalPath === undefined) delete process.env.PATH;
   else process.env.PATH = originalPath;

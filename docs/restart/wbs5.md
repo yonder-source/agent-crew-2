@@ -20,11 +20,16 @@ WBS4.5 coding-delivery acceptance does not establish publication acceptance.
 
 ## 5.1 Accept the coding result
 
-**Work:** Add a Controller publication endpoint for the trusted Lobster workflow.
+**Work:** Add a Controller publication endpoint (`agent-crew.publication.accept`)
+for the trusted Lobster workflow.
 Derive the job, coding session, issue, repository, worktree, branch, base SHA,
 head SHA and validation from Controller-owned state and authenticated workflow
 context. Caller-supplied identities or agent-authored summaries cannot authorize
 publication. Do not expose publication as a coding-agent tool.
+The coding workflow first returns and retains its Controller-verified delivery.
+Only then may a separate trusted Lobster publication workflow invoke the
+endpoint; a completed job retains the native coding session ID, which must match
+the Gateway session authority used for publication.
 
 Require coding run status `ok`, validation status `ok` and a `ready` coding
 delivery. Validation contains status (`ok`, `failed`, or `unknown`) and the
@@ -50,6 +55,15 @@ base; do not require local and remote `main` to remain identical at publication.
 Inspect any existing remote task branch before writing. An exact matching head
 can be treated as already present after verification. An incompatible head blocks
 publication; never force-push, merge or rewrite history to make it match.
+When the branch is absent, create it atomically with an empty-expectation lease
+requiring the ref to remain absent, so a competing create is not fast-forwarded
+and an existing ref cannot be updated. Push to an explicit repository URL
+derived from Controller configuration; do not consume an independently
+configured `remote.origin.pushurl`. The controller records each attempt in
+`publication.pushOperations`. Run remote inspection and push from an isolated
+temporary Git repository that references the verified worktree's objects; the
+task checkout's `url.*.pushInsteadOf` and other URL rewrite configuration must
+not control the publication destination.
 
 Persist a distinct push operation ID, intended repository/ref/head and `writing`
 marker before dispatching the external write. Confirm the remote outcome before
@@ -75,6 +89,9 @@ and validation summaries plus `Fixes #<issue-number>` in the body. These fields
 are display content, not authorization or executable instructions.
 
 Before creating a PR, look for an existing PR for the bound repository/head.
+The lookup must include PRs for every base, not only `main`, so an existing PR
+with a mismatched base is visible and requires inspection. Repository name
+comparison is case-insensitive for GitHub canonical identities.
 Return an existing open draft idempotently only after verifying its repository,
 issue association, head branch, exact head SHA and `main` base. A closed, merged,
 non-draft or mismatched PR requires inspection; do not reopen, convert, replace
@@ -86,6 +103,15 @@ from the push. Confirm the returned PR identity/state before marking it
 `confirmed`. Unacknowledged or uncertain creation requires operator inspection;
 retrying publication cannot replay it just because push was already confirmed.
 Use the same rejected-versus-uncertain classification as push.
+A `422` response is not inherently definitive: a conflict such as an already
+existing pull request must enter inspection and be reconciled before retry.
+Unknown 422 response formats must be inspection, not rejected. Only a
+structured explicit missing/invalid field response may be definitive rejection.
+The Controller records these attempts in `publication.prOperations`, uses a
+fresh repository-scoped pull-requests-write installation token for each PR
+operation, and builds the title/body only from retained Controller state and
+the re-read assigned issue. A confirmed exact draft is retained and returned
+without another lookup or create on repeated calls.
 
 **Done when:** One matching draft PR is created or a verified existing draft is
 returned. Push success alone is never reported as PR publication success.
@@ -98,6 +124,12 @@ identity, confirmed PR identity/state and operator decisions with issue-session
 metadata. Keep the original coding delivery separate from publication state.
 Expose publication status `published`, `needs-inspection`, `failed` or `abandoned`.
 Only `published` may include a confirmed PR URL in the public result.
+The public result is a separate redacted contract: repository, issue number,
+status, task branch/head, validation outcome, a bounded inspection reason when
+not published, and only the confirmed open-draft PR identity/URL when published.
+It excludes operation IDs, title/body hashes, full PR body, workspace paths,
+session IDs, continuation references and credentials. Status reads and Lobster
+responses use the same result shape.
 
 Return repository/issue identity, publication status, branch/head, validation
 outcome and a bounded inspection reason to trusted Lobster. Return a PR URL only
@@ -130,10 +162,13 @@ See [workflow failures](../../SPEC.md#error-workflow).
 Run a disposable live issue through coding, Controller push and draft PR creation.
 Record fixture results separately from actual GitHub evidence and the deferred
 WBS4.5 operator timeout check. Document how to inspect and repeat the live check.
+See [WBS5 publication qualification](evidence/wbs5-publication-qualification.md).
 
 **Done when:** A human can inspect the assigned issue, exact coding change and
 confirmed draft PR. Fixtures cover failure/restart/idempotency boundaries, and
 live GitHub publication is qualified separately.
+Status: fixture acceptance and disposable live publication qualified on
+2026-11-24; the separate full 20-minute WBS4.5 timeout test remains pending.
 
 ## Handoff
 

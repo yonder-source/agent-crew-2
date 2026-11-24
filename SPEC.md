@@ -418,25 +418,58 @@ binding, clean state, exact branch/head and recorded base ancestry. It does not
 accept caller-supplied authorization, expose a coding-agent publication tool,
 create another commit or rename the native managed branch. An incompatible
 remote task branch blocks publication; never force-push. Remote `main` advancing
-alone does not invalidate the recorded task base.
+alone does not invalidate the recorded task base. Create a missing remote task
+ref atomically with an empty-expectation lease that requires it to remain
+absent; this cannot update an existing ref, and a competing creation cannot be
+fast-forwarded. Push to an explicit URL derived from the configured repository
+rather than an arbitrary `remote.origin.pushurl`. Run network publication Git
+operations from a temporary isolated repository that references the verified
+worktree's objects, so local `url.*.pushInsteadOf` and other checkout URL
+rewrites cannot redirect the write.
+The Controller retains the delivery only after the coding workflow has returned
+and the native run is confirmed stopped. A separate trusted Lobster publication
+workflow then invokes publication. Retain the native coding session ID and
+require it to match both the current Gateway session and the publication
+invocation's session authority; a recreated session with the same key cannot
+reuse the delivery.
 
 Persist push and PR creation as separate operations with unique identities,
 pre-write intent and confirmed/failed/inspection outcomes. Unacknowledged writes
 and unfinished intent markers require operator inspection across restart, not
 automatic replay. A definitively rejected operation with no remote effect can be
 failed; ambiguous responses and conflicts must not be assumed side-effect-free.
+PR creation obtains a fresh repository-scoped pull-requests-write token; the
+Controller reuses an exact retained open draft rather than issuing another
+create request.
 PR creation uses base `main`, the assigned issue title, bounded coding/validation
 summaries and `Fixes #<issue-number>`. Reuse an existing open draft only when its
 repository, issue association, head branch/SHA and base match the delivery.
 Closed, merged, non-draft, mismatched or ambiguously identified PRs require
 inspection rather than automatic replacement or duplicate creation.
+Lookup the task head across all bases so an existing mismatched-base PR cannot
+look absent. Compare repository canonical identity case-insensitively. A 422
+response that indicates an existing/conflicting PR is uncertain and requires
+inspection; only a definitive rejected operation becomes failed.
+Unknown 422 formats remain uncertain. A 422 is definitive only for an explicit
+missing/invalid-field validation structure; opaque/conflicting formats cannot
+be assumed to prove no write or no existing PR.
 
 Public publication status is `published`, `needs-inspection`, `failed` or
 `abandoned`; only `published` may expose a confirmed PR URL. Preserve coding
-delivery separately from publication, and keep public results free of internal
-credentials. WBS6 consumes this result for Slack reporting: delivery failure
+delivery separately from publication. The shared public result contains only
+repository, issue, status, task branch/head, validation outcome, a bounded
+inspection reason and a confirmed open-draft PR identity/URL when published.
+Exclude operation IDs, hashes, full PR body, workspace/session identity,
+continuation references and credentials. Revalidate a retained confirmed PR
+read-only on later publication reporting; stale or ambiguous remote identity
+becomes inspection and cannot trigger replacement creation. WBS6 consumes this
+result for Slack reporting: delivery failure
 or delivery-only retry must not rerun coding, push or PR creation. Implementation
 and live publication acceptance belong to [WBS5](docs/restart/wbs5.md).
+Fixture and disposable live publication evidence is recorded in
+[WBS5 publication qualification](docs/restart/evidence/wbs5-publication-qualification.md).
+That acceptance remains separate from the deferred full 20-minute WBS4.5
+operator timeout check.
 
 Configure the OpenClaw Docker sandbox for non-main coding sessions with
 writable worktrees, a read-only container root, dropped capabilities and no

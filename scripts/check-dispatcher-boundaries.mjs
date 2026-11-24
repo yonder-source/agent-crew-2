@@ -10,6 +10,7 @@ import { createContext, runInContext } from "node:vm";
 import { IssueDiscovery } from "../dist/discovery.js";
 import { GitHubAppClient } from "../dist/github-app.js";
 import { isCodingDelivery, normalizeCodingUsage, isCodingUsage, addCodingUsage, parseTokenBudget } from "../dist/coding-result.js";
+import { pullRequestUrlMatches } from "../dist/github-pulls.js";
 
 const source = readFileSync(process.env.DISPATCHER_SOURCE ?? "dist/index.js", "utf8")
   .replace(/^import .*;\n/gm, "")
@@ -27,7 +28,7 @@ const tools = new Map();
 const methods = new Map();
 let issueToolFactory;
 const context = createContext({ authorizesSlackTaskReply, isReplyAfterSlackConnection, parseSlackTaskReply, isSlackTaskThread, postTaskSlackMessage, performance,
-  TaskBaseError, createHash, randomUUID, isCodingDelivery, normalizeCodingUsage, isCodingUsage, addCodingUsage, parseTokenBudget, process: { env: { AGENT_CREW_GATEWAY_TOKEN: "test" } },
+  TaskBaseError, createHash, randomUUID, isCodingDelivery, normalizeCodingUsage, isCodingUsage, addCodingUsage, parseTokenBudget, pullRequestUrlMatches, process: { env: { AGENT_CREW_GATEWAY_TOKEN: "test" } },
   assignedIssueFromSession, trustedSessionKey,
   GitHubAppClient,
   Type: new Proxy({}, { get: () => () => ({}) }),
@@ -37,6 +38,13 @@ const context = createContext({ authorizesSlackTaskReply, isReplyAfterSlackConne
   OctokitGitHubIssueProvider: class {
     async updateIssueBody() { await updateGate; if (updateFailure) throw updateFailure; return { body: "Changed" }; }
     async readIssue(repository, number) { return { repository, number, title: "Issue", body: "Body", state: "open", labels: [] }; }
+  },
+  GitHubPullRequestError: class GitHubPullRequestError extends Error {
+    constructor(code, message) { super(message); this.code = code; }
+  },
+  OctokitGitHubPullRequestProvider: class {
+    async findExisting() { return undefined; }
+    async create() { throw new Error("Synthetic dispatcher must not create a pull request"); }
   },
   IssueDiscovery: class {},
   parseConfig: () => ({ environment: "test", github: { repository: "owner/repo", pollIntervalMs: 60_000 } }), definePluginEntry: (entry) => entry,

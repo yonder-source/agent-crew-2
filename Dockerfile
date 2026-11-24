@@ -40,7 +40,7 @@ COPY --chown=node:node ui ./dist/control-ui/agent-crew
 
 FROM build AS checks
 COPY --chown=node:node . ./
-CMD ["sh", "-c", "npm run lint && npm run check:lint && npm run typecheck && sh -n scripts/check-all.sh && node scripts/check-config.mjs && node scripts/check-dispatcher-boundaries.mjs && node scripts/check-coding-boundaries.mjs && node scripts/check-coding-result.mjs && node scripts/check-native-usage.mjs && node scripts/check-native-stop.mjs && node scripts/check-native-timeout.mjs && node scripts/check-coding-workflow.mjs && node scripts/check-wbs3.mjs && node scripts/check-repository-connection.mjs && node scripts/check-slack-credentials.mjs && node scripts/check-slack-settings.mjs && node scripts/check-slack-task-thread.mjs && node scripts/check-slack-task-reply.mjs"]
+CMD ["sh", "-c", "npm run lint && npm run check:lint && npm run typecheck && sh -n scripts/check-all.sh && node scripts/check-config.mjs && node scripts/check-dispatcher-boundaries.mjs && node scripts/check-coding-boundaries.mjs && node scripts/check-coding-result.mjs && node scripts/check-native-usage.mjs && node scripts/check-native-stop.mjs && node scripts/check-native-timeout.mjs && node scripts/check-coding-workflow.mjs && node scripts/check-wbs3.mjs && node scripts/check-github-pulls.mjs && node scripts/check-repository-connection.mjs && node scripts/check-slack-credentials.mjs && node scripts/check-slack-settings.mjs && node scripts/check-slack-task-thread.mjs && node scripts/check-slack-task-reply.mjs"]
 
 FROM base AS runtime
 USER root
@@ -51,6 +51,6 @@ COPY --from=build --chown=node:node /app/extensions/agent-crew/dist ./dist
 COPY --from=build --chown=node:node /app/extensions/agent-crew/node_modules ./node_modules
 COPY --chown=node:node package.json openclaw.plugin.json openclaw.json ./
 COPY --chown=node:node infra/local-dev/openclaw/workflows ./workflows
-COPY --chown=node:node scripts/check-gateway.mjs scripts/session-roundtrip.mjs scripts/check-setup-draft.mjs ./scripts/
+COPY --chown=node:node scripts/check-gateway.mjs scripts/session-roundtrip.mjs scripts/check-setup-draft.mjs scripts/publication-call.mjs ./scripts/
 USER node
 CMD ["openclaw", "gateway", "--allow-unconfigured"]
