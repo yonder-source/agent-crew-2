@@ -466,6 +466,10 @@ becomes inspection and cannot trigger replacement creation. WBS6 consumes this
 result for Slack reporting: delivery failure
 or delivery-only retry must not rerun coding, push or PR creation. Implementation
 and live publication acceptance belong to [WBS5](docs/restart/wbs5.md).
+Fixture and disposable live publication evidence is recorded in
+[WBS5 publication qualification](docs/restart/evidence/wbs5-publication-qualification.md).
+That acceptance remains separate from the deferred full 20-minute WBS4.5
+operator timeout check.
 
 Configure the OpenClaw Docker sandbox for non-main coding sessions with
 writable worktrees, a read-only container root, dropped capabilities and no

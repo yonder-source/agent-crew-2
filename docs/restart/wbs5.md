@@ -162,10 +162,13 @@ See [workflow failures](../../SPEC.md#error-workflow).
 Run a disposable live issue through coding, Controller push and draft PR creation.
 Record fixture results separately from actual GitHub evidence and the deferred
 WBS4.5 operator timeout check. Document how to inspect and repeat the live check.
+See [WBS5 publication qualification](evidence/wbs5-publication-qualification.md).
 
 **Done when:** A human can inspect the assigned issue, exact coding change and
 confirmed draft PR. Fixtures cover failure/restart/idempotency boundaries, and
 live GitHub publication is qualified separately.
+Status: fixture acceptance and disposable live publication qualified on
+2026-11-24; the separate full 20-minute WBS4.5 timeout test remains pending.
 
 ## Handoff
 
