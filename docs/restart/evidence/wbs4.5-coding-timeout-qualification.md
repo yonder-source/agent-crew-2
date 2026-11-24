@@ -2,6 +2,16 @@
 
 Date: 2026-11-23
 
+## Pending operator acceptance — 2026-11-24
+
+The user will perform the full 20-minute live timeout test later. It remains
+**pending**, not passed. No additional 20-minute run was started for PR creation.
+The 60-second corrected native test below and Controller fixtures are the current
+evidence. The operator check should cover Controller → Lobster → coding,
+retained elapsed/inspection state, stopped parent/descendant processes, no ready
+coding delivery, no automatic restart and retained inspection after Gateway
+restart. Append the actual result and run/job identities here when available.
+
 ## Evidence boundaries
 
 Controller fixtures cover the shared 1,200,000 ms active budget, excluding human

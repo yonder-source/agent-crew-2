@@ -411,6 +411,33 @@ the credential-bearing Gateway.
 Qualify this behavior together with Git operations and isolation inside the
 coding sandbox through the WBS4.5 integration check.
 
+WBS5 publication is a planned Controller-only operation invoked by the trusted
+Lobster workflow. It consumes the retained `ready` coding delivery, requires
+coding and validation status `ok`, and independently verifies repository/worktree
+binding, clean state, exact branch/head and recorded base ancestry. It does not
+accept caller-supplied authorization, expose a coding-agent publication tool,
+create another commit or rename the native managed branch. An incompatible
+remote task branch blocks publication; never force-push. Remote `main` advancing
+alone does not invalidate the recorded task base.
+
+Persist push and PR creation as separate operations with unique identities,
+pre-write intent and confirmed/failed/inspection outcomes. Unacknowledged writes
+and unfinished intent markers require operator inspection across restart, not
+automatic replay. A definitively rejected operation with no remote effect can be
+failed; ambiguous responses and conflicts must not be assumed side-effect-free.
+PR creation uses base `main`, the assigned issue title, bounded coding/validation
+summaries and `Fixes #<issue-number>`. Reuse an existing open draft only when its
+repository, issue association, head branch/SHA and base match the delivery.
+Closed, merged, non-draft, mismatched or ambiguously identified PRs require
+inspection rather than automatic replacement or duplicate creation.
+
+Public publication status is `published`, `needs-inspection`, `failed` or
+`abandoned`; only `published` may expose a confirmed PR URL. Preserve coding
+delivery separately from publication, and keep public results free of internal
+credentials. WBS6 consumes this result for Slack reporting: delivery failure
+or delivery-only retry must not rerun coding, push or PR creation. Implementation
+and live publication acceptance belong to [WBS5](docs/restart/wbs5.md).
+
 Configure the OpenClaw Docker sandbox for non-main coding sessions with
 writable worktrees, a read-only container root, dropped capabilities and no
 network egress. Run Lobster from the unsandboxed main controller session and

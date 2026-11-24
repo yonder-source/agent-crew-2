@@ -6,6 +6,20 @@ Provide a small repository connection screen accessible from OpenClaw so an
 operator can configure one GitHub repository for the Controller without editing
 JSON. The [root SPEC](../../SPEC.md) owns the requirements.
 
+## Acceptance status — 2026-11-24
+
+Implementation and the recorded bounded browser, GitHub, Slack, coding and
+native-process qualifications are delivered. **Full 20-minute timeout acceptance
+is pending user testing**, deferred by the operator; do not report it as passed
+or use this deferral to claim unattended production readiness. The corrected
+runtime has passed a real 60-second deadline/process-tree test. The complete
+Controller → Lobster → coding timeout path and cumulative limit still need the
+operator's live check; deterministic cumulative-time fixtures are separate.
+Record the eventual run identity, retained elapsed time/inspection state,
+parent/descendant stopped state, absence of a ready delivery, and absence of
+automatic continuation in the
+[timeout evidence](evidence/wbs4.5-coding-timeout-qualification.md).
+
 ## Entry conditions
 
 - [WBS4](wbs4.md) provides coding execution and its result handoff. Qualify
@@ -305,6 +319,13 @@ result and its assigned worktree; WBS5 validates the resulting draft PR.
 
 [WBS5](wbs5.md) uses the configured connection and Git authentication to
 publish the coding result as a draft PR. WBS6 extends Slack and validates the MVP.
+The pending operator timeout test above remains visible in that handoff; WBS5
+publication design does not make it passed. WBS4.5 supplies the trusted retained
+coding delivery, not a publication request authored by the coding agent. WBS5
+owns push/PR operation markers, PR idempotency and publication outcome state;
+publication failure must not overwrite the original coding delivery.
+The reviewed grilling decisions are recorded in
+[the WBS4.5/WBS5 review](evidence/wbs4.5-wbs5-grilling-review.md).
 
 Token accounting source inspection and a live read-only query are recorded in
 [token accounting qualification](evidence/wbs4.5-coding-token-qualification.md).
