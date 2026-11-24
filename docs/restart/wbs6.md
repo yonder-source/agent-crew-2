@@ -102,8 +102,20 @@ status, Slack delivery and an uncertain outcome. Record the selected image,
 plugin and coding runtime versions.
 
 **Done when:** An operator can configure and run the integrated workflow and
-find the issue, coding result and PR. Remaining deployment checks are identified
-for the next slice.
+find the issue, coding result and confirmed PR; inspect task-thread delivery;
+and make an evidence-based decision when a workflow outcome is uncertain.
+Record the selected runtime and identify the remaining deployment checks.
+
+**Handoff:** The [operator guide](../../README.md#wbs6-operator-handoff)
+documents the Control UI setup, local Compose overlays, retained job/status
+inspection, bounded Slack delivery retry, and uncertain publication recovery.
+The live qualification records OpenClaw/Slack `2026.11.3`, Node.js `v24.22.1`,
+coding model `gpt-6-luna`, and the runtime image digest in
+[WBS6 MVP evidence](evidence/wbs6-mvp-qualification.md).
+
+The next deployment slice must qualify cloud VM startup/networking and
+production secret delivery/rotation. Slack readiness approval and automated
+recovery policy remain open.
 
 ## Handoff
 
