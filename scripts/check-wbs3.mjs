@@ -140,6 +140,26 @@ const failingDiscovery = new IssueDiscovery({
 });
 await failingDiscovery.poll();
 assert.match(failure.message, /provider unavailable/);
+let failedPhase;
+const dispatchFailure = new IssueDiscovery({
+  repository: "owner/repo",
+  listReadyIssues: async () => [{ repository: "owner/repo", number: 7 }],
+  dispatch: async () => { throw new Error("dispatch blocked"); },
+  onComplete: () => assert.fail("Failed dispatch must not report completion"),
+  onFailure: (_error, phase) => { failedPhase = phase; },
+});
+await dispatchFailure.poll();
+assert.equal(failedPhase, "dispatch");
+const queryFailure = new IssueDiscovery({
+  repository: "owner/repo",
+  listReadyIssues: async () => { throw new Error("query blocked"); },
+  dispatch: async () => assert.fail("Failed query must not dispatch"),
+  onComplete: () => assert.fail("Failed query must not report completion"),
+  onFailure: (_error, phase) => { failedPhase = phase; },
+});
+await queryFailure.poll();
+assert.equal(failedPhase, "discovery");
+
 
 const trustedContext = { sessionKey: "agent:main:issue-7", assertInvocationCurrent() {} };
 assert.equal(trustedSessionKey(trustedContext), "agent:main:issue-7");

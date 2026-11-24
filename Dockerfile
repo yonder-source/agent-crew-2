@@ -7,6 +7,16 @@ FROM openclaw-upstream AS sandbox
 FROM openclaw-upstream AS base
 USER root
 RUN npm install --prefix /opt/agent-crew-lobster --omit=dev --ignore-scripts @openclaw/lobster@2026.11.3
+COPY scripts/patch-openclaw-startup.mjs /opt/agent-crew-patches/patch-openclaw-startup.mjs
+RUN node /opt/agent-crew-patches/patch-openclaw-startup.mjs
+COPY scripts/patch-openclaw-usage.mjs /opt/agent-crew-patches/patch-openclaw-usage.mjs
+RUN node /opt/agent-crew-patches/patch-openclaw-usage.mjs
+COPY scripts/patch-openclaw-stop.mjs /opt/agent-crew-patches/patch-openclaw-stop.mjs
+RUN node /opt/agent-crew-patches/patch-openclaw-stop.mjs
+COPY scripts/patch-openclaw-timeout.mjs /opt/agent-crew-patches/patch-openclaw-timeout.mjs
+RUN node /opt/agent-crew-patches/patch-openclaw-timeout.mjs
+RUN npm install --prefix /opt/agent-crew-slack --omit=dev --legacy-peer-deps --ignore-scripts --no-audit --no-fund @openclaw/slack@2026.11.3 \
+    && ln -s /app /opt/agent-crew-slack/node_modules/openclaw
 USER node
 
 FROM base AS build
@@ -26,10 +36,11 @@ RUN npm ci --include=dev --legacy-peer-deps --ignore-scripts --no-audit --no-fun
 COPY --chown=node:node openclaw.plugin.json tsconfig.json ./
 COPY --chown=node:node src ./src
 RUN npm run build
+COPY --chown=node:node ui ./dist/control-ui/agent-crew
 
 FROM build AS checks
 COPY --chown=node:node . ./
-CMD ["sh", "-c", "npm run lint && npm run check:lint && npm run typecheck && sh -n scripts/check-all.sh && node scripts/check-config.mjs && node scripts/check-dispatcher-boundaries.mjs && node scripts/check-coding-boundaries.mjs && node scripts/check-coding-result.mjs && node scripts/check-wbs3.mjs"]
+CMD ["sh", "-c", "npm run lint && npm run check:lint && npm run typecheck && sh -n scripts/check-all.sh && node scripts/check-config.mjs && node scripts/check-dispatcher-boundaries.mjs && node scripts/check-coding-boundaries.mjs && node scripts/check-coding-result.mjs && node scripts/check-native-usage.mjs && node scripts/check-native-stop.mjs && node scripts/check-native-timeout.mjs && node scripts/check-coding-workflow.mjs && node scripts/check-wbs3.mjs && node scripts/check-repository-connection.mjs && node scripts/check-slack-credentials.mjs && node scripts/check-slack-settings.mjs && node scripts/check-slack-task-thread.mjs && node scripts/check-slack-task-reply.mjs"]
 
 FROM base AS runtime
 USER root
@@ -40,6 +51,6 @@ COPY --from=build --chown=node:node /app/extensions/agent-crew/dist ./dist
 COPY --from=build --chown=node:node /app/extensions/agent-crew/node_modules ./node_modules
 COPY --chown=node:node package.json openclaw.plugin.json openclaw.json ./
 COPY --chown=node:node infra/local-dev/openclaw/workflows ./workflows
-COPY --chown=node:node scripts/check-gateway.mjs scripts/session-roundtrip.mjs ./scripts/
+COPY --chown=node:node scripts/check-gateway.mjs scripts/session-roundtrip.mjs scripts/check-setup-draft.mjs ./scripts/
 USER node
 CMD ["openclaw", "gateway", "--allow-unconfigured"]

@@ -1,0 +1,13 @@
+services:
+  gateway:
+    environment:
+      OPENCLAW_CONFIG_PATH: /etc/agent-crew/openclaw.json
+    volumes:
+      - ../../../.local/gateway-config:/etc/agent-crew
+    secrets:
+      - source: github_app_private_key
+        target: agent-crew-github-app-private-key
+
+secrets:
+  github_app_private_key:
+    file: ../../../.local/secrets/agent-crew.pem

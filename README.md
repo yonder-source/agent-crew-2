@@ -14,6 +14,10 @@ ESLint `10.15.0`, typescript-eslint `8.73.0`, `@eslint/js` `10.0.1` and
 installation is skipped. The build restores SDK declarations from the matching
 npm release (the runtime image omits them). Typechecking uses those declarations,
 without local SDK stubs.
+The build applies a source-hash-guarded startup patch for this pinned runtime:
+model publication supersession enters the existing bounded agent-startup retry
+instead of leaving a healthy agent database unavailable. See the
+[diagnosis and native verification](docs/restart/evidence/gateway-startup-publication-race.md).
 Build tools, restored declarations and plugin sources stay in the separate checks
 image; the Gateway image receives compiled plugin output and runtime files only.
 
@@ -60,9 +64,9 @@ surviving a Gateway restart, plus synthetic dispatcher interruption checks:
 ./scripts/check-all.sh
 ```
 
-Gateway state is stored in the named Docker volume `agent-crew-2_openclaw-data`
-(Compose prefixes the volume with its project name). Remove this disposable
-state with `docker compose -f infra/local-dev/openclaw/compose.yaml down --volumes`.
+Gateway state is stored under `.local/openclaw-gateway-state` on the Docker host
+and remains ignored by Git. The local setup preserves the original named volume
+as a rollback copy after migrating its contents into this bind-mounted directory.
 
 ## Disposable session check
 
@@ -105,16 +109,112 @@ and volume and needs local port 18789 available.
 
 ## WBS3 GitHub issue access
 
-Configure the plugin with `github.repository` and optional `github.pollIntervalMs`
-to enable polling. The Gateway reads the pre-provisioned GitHub App installation
-token from `/run/secrets/agent-crew-github-installation-token`; local Docker
-users can mount it with `infra/local-dev/openclaw/compose.github.yaml` using a
-file at `.local/secrets/github-app-installation-token`. The installation needs
-Issues read/write permission. WBS3 checks use deterministic fixtures unless a
-disposable GitHub repository and installation token are supplied; fixture
-results are not live GitHub qualification.
+Configure `github.repository`, `github.appId`, `github.installationId` and
+optional `github.pollIntervalMs`, or use the repository setup page. In App mode,
+the Controller reads the private key from
+`/run/secrets/agent-crew-github-app-private-key` and obtains a fresh token for each
+operation: repository-scoped Contents read for clone/fetch and Issues write for
+issue operations. It does not cache installation tokens or require their manual
+replacement. Invalid or expired token responses are rejected before use. The
+installation needs Issues read/write permission. Fixtures are separate from
+live GitHub qualification.
+
+Configurations without an App ID retain the legacy pre-provisioned installation
+token at `/run/secrets/agent-crew-github-installation-token`. Local Docker users
+can mount `.local/secrets/github-app-installation-token` with
+`infra/local-dev/openclaw/compose.github.yaml`; that overlay also mounts the App
+private key. Legacy tokens require manual replacement on expiry. The key and
+tokens never enter the UI or coding sandbox.
+
+For unattended App-mode setup, use
+`infra/local-dev/openclaw/compose.setup.yaml`. It needs only
+`.local/secrets/agent-crew.pem`, and mounts the writable configuration
+directory `.local/gateway-config` at `/etc/agent-crew`. Initialize
+`.local/gateway-config/openclaw.json` from the existing Gateway configuration
+to preserve agent and model settings (or from root `openclaw.json` on a fresh
+installation). Then build and start with:
+
+```sh
+docker compose -f infra/local-dev/openclaw/compose.yaml -f infra/local-dev/openclaw/compose.setup.yaml up -d --build gateway
+```
+
+Save retains and validates a pending draft. Apply checks active/uncertain work,
+pauses admission and scheduling, prepares the checkout, then saves the
+revision-checked native configuration while preserving other settings. Saving
+and runtime activation are reported separately; the native reloader activates
+the connection after the Apply request finishes. Runtime activation resumes scheduling only after connection and task-state
+checks. Resume scheduling repeats those checks manually. An unacknowledged
+configuration write requires inspection before retrying or resuming.
+Native UI assets are snapshotted at Gateway startup and served under an
+immutable revision URL. After updating UI files, restart the Gateway to publish
+the new revision; copying files into a running container is insufficient.
+
+### GitHub App credentials and rotation
+
+The App owner installs the App on the intended repository and grants the needed
+permissions; the deployment operator provisions the PEM at the fixed host path.
+GitHub installation tokens expire after one hour. Each new operation obtains a
+new token rather than extending an old one. Credential acquisition failures stop
+that operation; recovery never automatically replays an issue write with an
+uncertain outcome. See [GitHub's installation token documentation](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app).
+
+To rotate the PEM:
+
+1. The App owner generates an additional private key in GitHub, keeping the old
+   key active until the new one is validated.
+2. The operator confirms no coding run is active, resolves uncertain tasks and
+   stops the Gateway before replacing `.local/secrets/agent-crew.pem`. Preserve
+   permissions that allow the Gateway user to read it and keep it out of Git.
+3. Recreate the Gateway with the same Compose files (`up -d --force-recreate
+   gateway`). Recreating refreshes the single-file secret bind after an atomic
+   host-file replacement; a process restart alone is not sufficient for that case.
+4. Validate the saved connection using the UI, confirm discovery/read access and
+   scheduling status, then have the App owner revoke the old key in GitHub.
+
+Missing keys, rejected App authentication, unavailable installations or missing
+permissions require correcting the credential/setup before validation and
+resuming scheduling. Inspect and explicitly resolve any uncertain write before
+retrying it. The Controller reads the current PEM when creating each App JWT;
+it does not keep the private key or installation token in a retained store.
+See [GitHub's private-key rotation documentation](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/managing-private-keys-for-github-apps).
+
+## Slack credential readiness
+
+Provision the Slack bot token in `.local/secrets/slack-bot-token` and the
+Socket Mode app token in `.local/secrets/slack-app-token`. Keep them out of Git
+and readable by the Gateway user. Add
+`-f infra/local-dev/openclaw/compose.slack.yaml` to the existing Compose command
+when recreating the Gateway to mount both files read-only as Docker secrets.
+Only the Gateway receives these mounts.
+
+The setup page's **Slack credentials** area checks readability and expected
+token type, with a button to repeat the check. Values and raw filesystem errors
+are never returned. `Available` means file readiness, not successful Slack
+authentication. The native transport setup below separately enables the
+Socket Mode connection. Applying saved channel/user routing and task interaction
+remain later work. The optional overlay requires both files to exist.
+
+### Native Slack Socket Mode connection
+
+The Gateway image includes `@openclaw/slack@2026.11.3`. To enable its transport,
+append `slack` to the existing `plugins.allow` and
+`/opt/agent-crew-slack/node_modules/@openclaw/slack` to `plugins.load.paths`,
+preserving the other entries. The
+[`slack.socket.patch.example.json`](infra/local-dev/openclaw/slack.socket.patch.example.json)
+fragment supplies plugin enablement, file SecretRefs and Socket Mode settings.
+Merge it into the existing configuration and validate with the pinned runtime
+before applying; use the Slack Compose overlay when recreating the Gateway.
+
+The fragment disables generic DM/channel handling, slash commands and join
+introductions. The transport can connect while task-bound reply handling is
+still being implemented. Native `channels.status` reports the account's
+`running`, `connected` and probe result; file availability alone does not establish
+connection. See [native connection evidence](docs/restart/evidence/wbs4.5-slack-socket-qualification.md).
 
 ## Local coding workflow
+
+This example uses legacy token-file credentials; the setup overlay above provides
+App-mode issuance for unattended operation.
 
 The default Compose config stays credential-free for synthetic checks. To run
 the real coding workflow, copy
@@ -135,6 +235,21 @@ docker compose -f infra/local-dev/openclaw/compose.yaml -f infra/local-dev/openc
 ```
 
 The `coding` overlay mounts the local config read-only; `compose.github.yaml`
-mounts the token as a Gateway secret. Never put token values in the config
-file. Stop and remove the disposable runtime with the same Compose files and
-`down` when finished.
+mounts the installation token and App private key as Gateway secrets. Never put
+credential values in the config file. Stop and remove the disposable runtime
+with the same Compose files and `down` when finished.
+
+
+### Local skills
+
+The local base Compose file mounts `.local/skills` read-only at
+`/opt/agent-crew-skills`. Root `openclaw.json` and the coding example add that directory to native
+`skills.load.extraDirs`; preserve existing entries when enabling it in a retained
+Gateway config. Keep each skill in its own directory containing `SKILL.md` and
+its supporting files. An empty directory means no additional local skills.
+The local directory remains ignored by Git and excluded from the image context.
+
+Native OpenClaw discovers these skills and materializes sandbox-readable copies
+in its protected skills workspace. Source discovery alone does not establish
+that a particular harness can use a skill or execute its supporting tools.
+Skill installation/removal UI remains later scope.

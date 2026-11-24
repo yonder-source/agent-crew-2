@@ -1,0 +1,34 @@
+{
+  "plugins": {
+    "entries": {
+      "slack": { "enabled": true }
+    }
+  },
+  "secrets": {
+    "providers": {
+      "slack_bot_file": {
+        "source": "file",
+        "path": "/run/secrets/agent-crew-slack-bot-token",
+        "mode": "singleValue"
+      },
+      "slack_app_file": {
+        "source": "file",
+        "path": "/run/secrets/agent-crew-slack-app-token",
+        "mode": "singleValue"
+      }
+    }
+  },
+  "channels": {
+    "slack": {
+      "enabled": true,
+      "mode": "socket",
+      "botToken": { "source": "file", "provider": "slack_bot_file", "id": "value" },
+      "appToken": { "source": "file", "provider": "slack_app_file", "id": "value" },
+      "dmPolicy": "disabled",
+      "groupPolicy": "disabled",
+      "joinIntro": false,
+      "commands": { "native": false, "nativeSkills": false },
+      "slashCommand": { "enabled": false }
+    }
+  }
+}

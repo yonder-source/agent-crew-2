@@ -1,0 +1,68 @@
+.agent-crew-setup {
+  display: grid;
+  grid-template-columns: minmax(280px, 2fr) minmax(220px, 1fr);
+  gap: 24px;
+  max-width: 1100px;
+}
+
+.agent-crew-setup form,
+.agent-crew-setup aside {
+  border: 1px solid var(--border, #777);
+  border-radius: 8px;
+  padding: 20px;
+  align-self: start;
+  min-width: 0;
+}
+
+.agent-crew-setup input,
+.agent-crew-setup select {
+  width: 100%;
+  max-width: 640px;
+  margin-top: 6px;
+  padding: 8px;
+  box-sizing: border-box;
+}
+
+.agent-crew-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+}
+
+.agent-crew-app-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 12px;
+  margin-top: 6px;
+  max-width: 640px;
+}
+
+.agent-crew-app-controls input {
+  min-width: 0;
+  width: 100%;
+  margin-top: 0;
+}
+
+.agent-crew-app-controls button {
+  min-width: 0;
+  box-sizing: border-box;
+  white-space: normal;
+}
+
+@media (max-width: 700px) {
+  .agent-crew-setup { grid-template-columns: 1fr; }
+}
+
+.agent-crew-check-status[data-status="passed"] {
+  color: var(--success, #15803d);
+}
+
+.agent-crew-check-status[data-status="unverified"],
+.agent-crew-check-status[data-status="pending"] {
+  color: var(--warning, #a16207);
+}
+
+.agent-crew-check-status[data-status="failed"] {
+  color: var(--danger, #b91c1c);
+}

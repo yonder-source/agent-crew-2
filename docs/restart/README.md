@@ -7,8 +7,8 @@ decisions. This package also preserves restart-specific evidence, implementation
 packages and historical context. [WBS0](wbs0.md) records feasibility findings,
 [WBS1](wbs1.md) is the foundation package, [WBS2](wbs2.md) is the dispatcher
 package, and [WBS3](wbs3.md) adds GitHub discovery and assigned issue access.
-[WBS4](wbs4.md) adds real coding, [WBS5](wbs5.md) adds draft PR publication,
-[WBS5.5](wbs5.5.md) adds the repository connection UI, and [WBS6](wbs6.md)
+[WBS4](wbs4.md) adds real coding, [WBS4.5](wbs4.5.md) adds the repository
+connection UI, [WBS5](wbs5.md) adds draft PR publication, and [WBS6](wbs6.md)
 completes Slack reporting and workflow acceptance.
 [Outstanding items](outstanding.md) captures proposed solutions and
 deferred questions.

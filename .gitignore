@@ -4,8 +4,12 @@ node_modules/
 .local/secrets/
 .local/openclaw-coding.json
 .local/openclaw-state/
+.local/openclaw-gateway-state/
 .local/repositories/
+.local/skills/
 
 .local/worktrees/
 .local/worktree-projections/
 .local/sandbox/
+.local/gateway-config/
+.local/deployment-backups/

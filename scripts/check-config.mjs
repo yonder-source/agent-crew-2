@@ -34,6 +34,11 @@ assert.throws(
   () => parseConfig({ environment: { value: "test-secret" } }),
   (error) => error instanceof Error && !error.message.includes("test-secret"),
 );
+// Exercise the native manifest schema as well as the parser.
+codingExample.plugins.entries["agent-crew"].config.slack = {
+  coding: { agentId: "coding", channelId: "C123", userIds: ["U123"] },
+  designer: { agentId: "designer", channelId: "G456", userIds: ["U123"] },
+};
 const directory = mkdtempSync(join(tmpdir(), "agent-crew-config-"));
 try {
   const codingExamplePath = join(directory, "openclaw-coding.json");
@@ -66,3 +71,10 @@ try {
   rmSync(directory, { recursive: true, force: true });
 }
 console.log("Configuration validation checks passed.");
+
+for (const tokenBudget of [0, -1, 1.2, "100", Number.MAX_SAFE_INTEGER + 1]) {
+  assert.throws(() => parseConfig({environment: "test", github: {repository: "owner/repo"},
+    coding: {repositoryPath: "/repo", tokenBudget}}), /coding configuration is invalid/);
+}
+assert.equal(parseConfig({environment: "test", github: {repository: "owner/repo"},
+  coding: {repositoryPath: "/repo", tokenBudget: 100}}).coding.tokenBudget, 100);

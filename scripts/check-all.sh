@@ -3,13 +3,15 @@ set -eu
 
 COMPOSE_PROJECT_NAME=agent-crew-checks
 COMPOSE_FILE=infra/local-dev/openclaw/compose.yaml
+AGENT_CREW_OPENCLAW_STATE_DIR=$(mktemp -d)
 AGENT_CREW_WORKTREE_DIR=$(mktemp -d)
 AGENT_CREW_PROJECTION_DIR=$(mktemp -d)
 AGENT_CREW_SANDBOX_STATE_DIR=$(mktemp -d)
 AGENT_CREW_REPOSITORY_DIR=$(mktemp -d)
-chmod 777 "$AGENT_CREW_WORKTREE_DIR" "$AGENT_CREW_PROJECTION_DIR" "$AGENT_CREW_SANDBOX_STATE_DIR" "$AGENT_CREW_REPOSITORY_DIR"
+chmod 777 "$AGENT_CREW_OPENCLAW_STATE_DIR" "$AGENT_CREW_WORKTREE_DIR" "$AGENT_CREW_PROJECTION_DIR" "$AGENT_CREW_SANDBOX_STATE_DIR" "$AGENT_CREW_REPOSITORY_DIR"
 export COMPOSE_PROJECT_NAME
 export COMPOSE_FILE
+export AGENT_CREW_OPENCLAW_STATE_DIR
 export AGENT_CREW_WORKTREE_DIR
 export AGENT_CREW_PROJECTION_DIR
 export AGENT_CREW_SANDBOX_STATE_DIR
@@ -17,10 +19,17 @@ export AGENT_CREW_REPOSITORY_DIR
 
 deployment_model=$(mktemp)
 coding_deployment_model=$(mktemp)
+slack_deployment_model=$(mktemp)
 cleanup() {
   docker compose down --volumes
+  # Gateway state contains private directories owned by the container user.
+  docker run --rm --user 0 --entrypoint chown \
+    --mount "type=bind,src=$AGENT_CREW_OPENCLAW_STATE_DIR,dst=/cleanup" \
+    agent-crew-openclaw:2026.11.3 -R "$(id -u):$(id -g)" /cleanup
   rm -f "$deployment_model"
   rm -f "$coding_deployment_model"
+  rm -f "$slack_deployment_model"
+  rm -rf "$AGENT_CREW_OPENCLAW_STATE_DIR"
   rm -rf "$AGENT_CREW_WORKTREE_DIR"
   rm -rf "$AGENT_CREW_PROJECTION_DIR"
   rm -rf "$AGENT_CREW_SANDBOX_STATE_DIR"
@@ -45,15 +54,19 @@ docker compose --profile check config --format json > "$deployment_model"
 node scripts/check-deployment.mjs "$deployment_model"
 docker compose -f "$COMPOSE_FILE" -f infra/local-dev/openclaw/compose.coding.yaml --profile check config --format json > "$coding_deployment_model"
 node scripts/check-deployment.mjs "$coding_deployment_model" infra/local-dev/openclaw/openclaw.coding.example.json
+docker compose -f "$COMPOSE_FILE" -f infra/local-dev/openclaw/compose.slack.yaml --profile check config --format json > "$slack_deployment_model"
 docker build --target sandbox -t openclaw-sandbox:bookworm-slim .
 docker compose --profile check build
 docker compose --profile check run --rm checks
+docker compose --profile check run --rm -T checks node scripts/check-slack-credentials.mjs --stdin < "$slack_deployment_model"
 docker compose up -d --force-recreate gateway
 wait_for_gateway
 
 docker compose exec -T gateway sh -lc 'node scripts/check-gateway.mjs && node scripts/session-roundtrip.mjs'
+docker compose exec -T gateway node scripts/check-setup-draft.mjs
 docker compose restart gateway
 wait_for_gateway
 docker compose exec -T gateway node scripts/session-roundtrip.mjs --verify-only
+docker compose exec -T gateway node scripts/check-setup-draft.mjs --verify-only
 
 node scripts/check-dispatcher.mjs

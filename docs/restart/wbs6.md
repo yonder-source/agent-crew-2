@@ -2,22 +2,22 @@
 
 ## Goal
 
-Connect the issue-to-draft-PR workflow to Slack and provide the minimum
-configuration needed to run it. The [root SPEC](../../SPEC.md) defines
+Extend basic Slack task interaction with publication reporting, delivery retries
+and MVP acceptance. The [root SPEC](../../SPEC.md) defines
 the MVP workflow.
 
 ## Entry conditions
 
 - [WBS5-restart](wbs5.md) is complete: the Controller can publish a draft PR
   and return its URL to Lobster.
-- [WBS5.5](wbs5.5.md) is complete: the operator can connect one repository
+- [WBS4.5](wbs4.5.md) is complete: the operator can connect one repository
   through the OpenClaw-accessible UI and retain its validated configuration.
 - A disposable GitHub test repository and Slack channel are available for the
   integration check. Supply credentials through the agreed secret mechanism.
 
 ## 6.1 Configure the workflow
 
-**Work:** Use the WBS5.5 repository connection UI and provide the remaining
+**Work:** Use the WBS4.5 repository connection UI and provide the remaining
 Slack channel, agent, polling interval and credential references needed by the
 existing slices.
 Use the selected OpenClaw configuration facilities where suitable.
@@ -28,12 +28,14 @@ See [configuration errors](../../SPEC.md).
 
 ## 6.2 Connect Slack reporting
 
-**Work:** Use OpenClaw's Slack integration to report the assigned issue and
-workflow status to the configured channel.
+**Work:** Extend WBS4.5 Slack interaction with delivery retries. After an
+initial failed input-request message, retry at most three times; an uncertain
+delivery may be retried even if it produces a duplicate. Preserve waiting state
+and report failure when attempts are exhausted.
 
 **Done when:** A test workflow produces a Slack message identifying the issue
-and its status. A simulated delivery failure is visible to the operator and
-does not misrepresent the workflow or publication outcome.
+and its status. Exercise delivery failure, retry limits and uncertain delivery;
+failure remains visible and does not misrepresent workflow or publication outcome.
 See [Slack delivery failures](../../SPEC.md#error-slack).
 
 ## 6.3 Report the draft PR
@@ -49,7 +51,7 @@ See [workflow failures](../../SPEC.md#error-workflow).
 ## 6.4 Exercise the MVP workflow
 
 **Work:** In the disposable installation, connect the repository through the
-WBS5.5 UI, then manually label a test issue and follow
+WBS4.5 UI, then manually label a test issue and follow
 it through discovery, coding, Controller publication and Slack reporting.
 
 **Done when:** One coding workflow produces a draft PR and the configured Slack

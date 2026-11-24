@@ -4,4 +4,4 @@ dist
 .openclaw
 project-memory.md
 openclaw.json.last-good
-.local/secrets/
+.local/

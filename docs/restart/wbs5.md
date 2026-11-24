@@ -4,68 +4,144 @@
 
 Publish the result of an assigned coding task as a draft GitHub pull request
 through the Controller, then return the PR result to Lobster for reporting.
-The [root SPEC](../../SPEC.md) defines the MVP workflow.
+The [root SPEC](../../SPEC.md) defines the MVP workflow. This package is planned;
+WBS4.5 coding-delivery acceptance does not establish publication acceptance.
 
 ## Entry conditions
 
-- [WBS4-restart](wbs4.md) is complete: a real coding run produces a change and
-  returns its result through Lobster.
-- A disposable GitHub test repository and scoped publication credential are
-  available. Supply the credential through the agreed secret mechanism.
+- [WBS4.5](wbs4.5.md) provides the repository connection, GitHub App
+  authentication, sandbox Git qualification and retained coding delivery.
+  Its full 20-minute live timeout check remains pending operator testing;
+  preserve that qualification gap in WBS5 evidence.
+- WBS4.5 supplies the job/session/issue/repository/worktree/branch/base binding,
+  structured validation and a Controller-verified committed head SHA. Missing
+  or unverified delivery blocks push.
+- A disposable GitHub test repository is connected with publication permissions.
 
 ## 5.1 Accept the coding result
 
-**Work:** Add the Controller API needed to submit the result from the assigned
-coding session. Use the issue and repository assignment to identify the work
-and the source to publish.
+**Work:** Add a Controller publication endpoint for the trusted Lobster workflow.
+Derive the job, coding session, issue, repository, worktree, branch, base SHA,
+head SHA and validation from Controller-owned state and authenticated workflow
+context. Caller-supplied identities or agent-authored summaries cannot authorize
+publication. Do not expose publication as a coding-agent tool.
 
-**Done when:** The Controller accepts a result from the assigned session and
-rejects an unbound session or a request for a different issue. The result
-identifies the change and its validation outcome.
+Require coding run status `ok`, validation status `ok` and a `ready` coding
+delivery. Validation contains status (`ok`, `failed`, or `unknown`) and the
+retained command/outcome/exit-code records; missing or malformed evidence is
+`unknown`. Publication consumes the WBS4.5 delivery rather than accepting a
+replacement head or validation report from the caller.
+
+**Done when:** Unbound or mismatched requests are rejected, and publication can
+consume only the exact retained coding delivery. Failed publication leaves the
+original coding result and validation intact.
 See [assignment rejection](../../SPEC.md#error-assignment).
 
 ## 5.2 Publish the branch
 
-**Work:** Have the Controller prepare and push the assigned work to a task
-branch in the configured repository. Keep publication credentials with the
-Controller.
+**Work:** Keep publication credentials with the Controller. Publish the recorded
+`openclaw/agent-crew-issue-<number>` branch and verified head without renaming,
+recreating, rebasing or creating another commit. Recheck the worktree/repository
+binding, branch, clean state, exact head and recorded base ancestry before push.
+Dirty/untracked changes, changed head or incompatible binding require inspection.
+Remote `main` advancing after task preparation alone does not invalidate the
+base; do not require local and remote `main` to remain identical at publication.
 
-**Done when:** A valid test result produces a branch containing the intended
-change. A request cannot choose an unrelated repository or issue. An uncertain
-push outcome is visible for operator inspection before retry.
-See [assignment rejection](../../SPEC.md#error-assignment) and
-[uncertain outcomes](../../SPEC.md#error-uncertain).
+Inspect any existing remote task branch before writing. An exact matching head
+can be treated as already present after verification. An incompatible head blocks
+publication; never force-push, merge or rewrite history to make it match.
+
+Persist a distinct push operation ID, intended repository/ref/head and `writing`
+marker before dispatching the external write. Confirm the remote outcome before
+recording `confirmed`. Timeout, connection loss or an otherwise unconfirmed
+write retains `needs-inspection`, including across restart. A definitively
+rejected operation with no remote effect can be `failed`; do not classify all
+HTTP 4xx responses or Git process failures as proof that no write happened.
+Conflict/mismatch and ambiguous responses require inspection. Operator decisions
+may approve one retry or abandon the operation; credential refresh and repeated
+workflow calls must not automatically replay an uncertain push.
+
+**Done when:** The intended bound head is on the assigned remote branch, or a
+clear failed/inspection outcome is retained. Invalid delivery never causes a
+push. Restart preserves the effect marker, operation identity and operator
+decision; an unfinished `writing` marker is not treated as success or retried.
+See [uncertain outcomes](../../SPEC.md#error-uncertain).
 
 ## 5.3 Create the draft PR
 
-**Work:** Add Controller-mediated draft PR creation for the assigned issue and
-branch. Return the PR URL and status to the caller.
+**Work:** Use `main` as the fixed PR base and the verified published task branch
+as head. Derive the title from the assigned issue title; include bounded coding
+and validation summaries plus `Fixes #<issue-number>` in the body. These fields
+are display content, not authorization or executable instructions.
 
-**Done when:** A successful publication produces a draft PR for the assigned
-issue. An uncertain response is visible for operator inspection before retry.
+Before creating a PR, look for an existing PR for the bound repository/head.
+Return an existing open draft idempotently only after verifying its repository,
+issue association, head branch, exact head SHA and `main` base. A closed, merged,
+non-draft or mismatched PR requires inspection; do not reopen, convert, replace
+or overwrite it automatically. An incomplete or ambiguous lookup cannot prove
+that no PR exists and must not cause blind duplicate creation.
+
+PR creation has its own operation ID and pre-write `writing` marker, separate
+from the push. Confirm the returned PR identity/state before marking it
+`confirmed`. Unacknowledged or uncertain creation requires operator inspection;
+retrying publication cannot replay it just because push was already confirmed.
+Use the same rejected-versus-uncertain classification as push.
+
+**Done when:** One matching draft PR is created or a verified existing draft is
+returned. Push success alone is never reported as PR publication success.
 See [uncertain outcomes](../../SPEC.md#error-uncertain).
 
 ## 5.4 Return the publication result
 
-**Work:** Connect the Controller publication API to the Lobster workflow and
-retain the PR URL and status with the issue session.
+**Work:** Retain push and PR operation IDs, effect states, branch, verified commit
+identity, confirmed PR identity/state and operator decisions with issue-session
+metadata. Keep the original coding delivery separate from publication state.
+Expose publication status `published`, `needs-inspection`, `failed` or `abandoned`.
+Only `published` may include a confirmed PR URL in the public result.
 
-**Done when:** Lobster receives the PR result and the operator can inspect the
-URL and status. Publication failures remain visible in the workflow status.
+Return repository/issue identity, publication status, branch/head, validation
+outcome and a bounded inspection reason to trusted Lobster. Return a PR URL only
+when the exact matching open draft is confirmed. Public status and later Slack
+reporting exclude continuation credentials, installation tokens, credential
+helper details and internal operation credentials. Slack delivery failure or a
+later delivery-only retry cannot rerun coding, push or PR creation.
+
+**Done when:** Lobster and the operator can inspect a truthful retained result.
+Restart preserves separate push/PR inspection states. Repeated calls revalidate
+the remote PR identity/state and return the confirmed result or the inspection
+boundary instead of another write.
 See [workflow failures](../../SPEC.md#error-workflow).
 
 ## 5.5 Validate publication and hand off
 
-**Work:** Run a small WBS4 coding task through publication in the disposable
-GitHub repository. Document how to repeat the check and inspect its result.
+**Work:** Cover these boundaries with fixtures:
 
-**Done when:** A human can inspect the resulting draft PR, its assigned issue
-and the coding change. Record the outcome of the real GitHub test separately
-from fixture checks.
+- Trusted delivery acceptance and rejection of unbound/mismatched identities,
+  malformed validation, non-ready delivery and agent-supplied replacement heads.
+- Dirty/untracked worktrees, changed head, wrong branch/base ancestry,
+  remote-main advance and incompatible remote task branches.
+- Separate push/PR intent, confirmation, uncertainty, restart retention and
+  operator decisions; no force push or automatic uncertain-write replay.
+- Existing matching open draft, closed/merged/non-draft or mismatched PR,
+  ambiguous lookup and repeated publication calls without duplicate effects.
+- Lobster result/redaction, URL only for `published`, preserved coding result,
+  and reporting retries that cause no coding or publication side effects.
+
+Run a disposable live issue through coding, Controller push and draft PR creation.
+Record fixture results separately from actual GitHub evidence and the deferred
+WBS4.5 operator timeout check. Document how to inspect and repeat the live check.
+
+**Done when:** A human can inspect the assigned issue, exact coding change and
+confirmed draft PR. Fixtures cover failure/restart/idempotency boundaries, and
+live GitHub publication is qualified separately.
 
 ## Handoff
 
-[WBS5.5](wbs5.5.md) provides the repository connection UI using the settings
-and permissions established here. WBS6 then reports the PR result through Slack and leaves review and
-merge to a human. Automated repair, detailed check/review evidence processing
-and automatic reconciliation of uncertain writes remain for later review.
+[WBS6](wbs6.md) reports the confirmed publication result through Slack and owns
+message delivery operation IDs, bounded retries and delivery-only recovery.
+Publication outcome and Slack delivery outcome remain separate. Review and merge
+belong to a human. Automated repair, check/review evidence processing and automatic
+reconciliation of uncertain external writes remain later scope.
+
+The adopted and rejected proposals from `docs/wbs5-grilling` are recorded in
+[the grilling review](evidence/wbs4.5-wbs5-grilling-review.md).

@@ -22,9 +22,11 @@ function validate(model, settings, metadata = pkg) {
   }
   assert.ok(gateway.ports.some((port) => port.target === 18789 && String(port.published) === "18789"),
     "Gateway must publish the expected port");
-  assert.ok(gateway.volumes.some((volume) => volume.type === "volume"
+  assert.ok(gateway.volumes.some((volume) => volume.type === "bind"
     && volume.target === "/home/node/.openclaw"),
-  "Gateway state must use its named volume");
+  "Gateway state must use a host-backed bind mount for sibling sandboxes");
+  assert.equal(gateway.environment.TMPDIR, "/home/node/.openclaw/tmp",
+    "Inference setup workspaces must be created inside the host-backed state mount");
   assert.ok(gateway.volumes.some((volume) => volume.type === "bind"
     && volume.target === "/home/node/.openclaw/worktrees"), "Managed worktrees must use a host-backed bind");
   assert.ok(gateway.volumes.some((volume) => volume.type === "bind"
@@ -45,7 +47,7 @@ function validate(model, settings, metadata = pkg) {
   assert.equal(settings.gateway.auth.mode, "token", "Gateway must require token authentication");
   requireSetting(settings.gateway.auth.token === "${OPENCLAW_GATEWAY_TOKEN}",
     "Gateway token must reference OPENCLAW_GATEWAY_TOKEN");
-  assert.deepEqual(settings.plugins.allow, ["agent-crew", "lobster"], "Plugin allowlist changed");
+  assert.deepEqual(settings.plugins.allow, ["agent-crew", "lobster", "openai"], "Plugin allowlist changed");
   assert.deepEqual(settings.plugins.load.paths, [
     "/app/extensions/agent-crew", "/opt/agent-crew-lobster/node_modules/@openclaw/lobster",
   ], "Plugin paths changed");
@@ -82,6 +84,7 @@ function validate(model, settings, metadata = pkg) {
   assert.ok(dockerfile.includes("COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker"),
     "Gateway Docker CLI is missing");
   assert.ok(dockerfile.includes(`@openclaw/lobster@${version}`), "Lobster version mismatch");
+  assert.ok(dockerfile.includes(`@openclaw/slack@${version}`), "Slack version mismatch");
   assert.ok(dockerfile.includes(`npm pack openclaw@${version} `), "SDK declaration version mismatch");
   assert.equal(gateway.image, `agent-crew-openclaw:${version}`);
   assert.equal(model.services.checks.image, `agent-crew-openclaw-checks:${version}`);
@@ -93,7 +96,7 @@ for (const [mutate, expected] of [
   [(model) => { model.services.checks.ports = [{ host_ip: "::", target: 9999 }]; }, /loopback/],
   [(model) => { model.services.gateway.network_mode = "host"; }, /Host networking/],
   [(model) => { model.services.gateway.privileged = true; }, /privileged/],
-  [(model) => { model.services.gateway.volumes = []; }, /named volume/],
+  [(model) => { model.services.gateway.volumes = []; }, /host-backed bind mount/],
   [(model) => { model.services.checks.volumes[0].read_only = false; }, /read-only/],
   [(model) => { model.services.gateway.image = "agent-crew-openclaw:latest"; }, /image|equal/i],
 ]) {

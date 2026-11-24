@@ -1,9 +1,15 @@
+import { authorizesSlackTaskReply, isReplyAfterSlackConnection, parseSlackTaskReply } from "../dist/slack-task-reply.js";
+import { isSlackTaskThread, postTaskSlackMessage } from "../dist/slack-task-thread.js";
+import { performance } from "node:perf_hooks";
+import { TaskBaseError } from "../dist/repository-clone.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { assignedIssueFromSession, trustedSessionKey } from "../dist/assignment.js";
 import { createContext, runInContext } from "node:vm";
 import { IssueDiscovery } from "../dist/discovery.js";
+import { GitHubAppClient } from "../dist/github-app.js";
+import { isCodingDelivery, normalizeCodingUsage, isCodingUsage, addCodingUsage, parseTokenBudget } from "../dist/coding-result.js";
 
 const source = readFileSync(process.env.DISPATCHER_SOURCE ?? "dist/index.js", "utf8")
   .replace(/^import .*;\n/gm, "")
@@ -20,9 +26,10 @@ const workflowRelease = new Promise((resolve) => { releaseWorkflowResolve = reso
 const tools = new Map();
 const methods = new Map();
 let issueToolFactory;
-const context = createContext({
-  createHash, randomUUID, process: { env: { AGENT_CREW_GATEWAY_TOKEN: "test" } },
+const context = createContext({ authorizesSlackTaskReply, isReplyAfterSlackConnection, parseSlackTaskReply, isSlackTaskThread, postTaskSlackMessage, performance,
+  TaskBaseError, createHash, randomUUID, isCodingDelivery, normalizeCodingUsage, isCodingUsage, addCodingUsage, parseTokenBudget, process: { env: { AGENT_CREW_GATEWAY_TOKEN: "test" } },
   assignedIssueFromSession, trustedSessionKey,
+  GitHubAppClient,
   Type: new Proxy({}, { get: () => () => ({}) }),
   GitHubIssueError: class GitHubIssueError extends Error {
     constructor(code, message) { super(message); this.code = code; }
@@ -62,6 +69,7 @@ context.entry.register({
     else tools.set(tool.name, tool);
   },
   registerGatewayMethod: (name, handler, options) => methods.set(name, { handler, options }),
+  on() {},
   registerService() {},
   logger: { info() {}, error() {} },
 });
@@ -95,6 +103,12 @@ assert.equal(methods.get("agent-crew.dispatch").options.scope, "operator.admin")
 holdWorkflow = true;
 const runningDispatch = dispatch();
 await workflowStarted;
+await methods.get("agent-crew.setup.apply").handler({
+  respond: (ok, _value, error) => {
+    assert.equal(ok, false);
+    assert.equal(error.code, "SETUP_APPLY_BLOCKED");
+  },
+});
 assert.equal(calls.filter((method) => method === "sessions.describe").length, 1);
 const assignedJob = session.pluginExtensions[0].value;
 const issueTools = issueToolFactory.create({

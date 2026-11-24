@@ -33,7 +33,7 @@ const syntaxRestrictions = [
 ];
 
 export default defineConfig([
-  { ignores: ["dist/**", "node_modules/**"] },
+  { ignores: ["dist/**", "node_modules/**", ".local/**"] },
   {
     files: ["**/*.{js,cjs,mjs,ts,cts,mts}"],
     extends: [js.configs.recommended],
@@ -50,9 +50,12 @@ export default defineConfig([
   ...[
     ["scripts/check-lint.mjs", "spawnSync"],
     ["scripts/check-config.mjs", "spawnSync"],
+    ["scripts/check-setup-draft.mjs", "spawnSync"],
     ["scripts/check-gateway.mjs", "spawnSync"],
     ["scripts/session-roundtrip.mjs", "spawnSync"],
     ["scripts/check-dispatcher.mjs", "execFile"],
+    ["scripts/check-repository-connection.mjs", "spawnSync"],
+    ["scripts/check-coding-workflow.mjs", "spawnSync"],
   ].map(([file, allowed]) => ({
     files: [file],
     rules: {
@@ -65,14 +68,18 @@ export default defineConfig([
     },
   })),
   {
-    // The mock boundary harness runs compiled dispatcher code in a VM.
-    files: ["scripts/check-dispatcher-boundaries.mjs", "scripts/check-coding-boundaries.mjs"],
+    files: ["ui/**/*.js"],
+    languageOptions: { globals: globals.browser },
+  },
+  {
+    // Boundary fixtures run compiled dispatcher or pinned native callbacks in a VM.
+    files: ["scripts/check-dispatcher-boundaries.mjs", "scripts/check-coding-boundaries.mjs", "scripts/check-native-timeout.mjs"],
     rules: {
       "no-restricted-imports": restrictImports([
         ...processLoaders, "child_process", "node:child_process",
         ...["vm", "node:vm"].map((name) => ({
           name, allowImportNames: ["createContext", "runInContext"],
-          message: "Only the compiled dispatcher VM harness operations are approved.",
+          message: "Only the reviewed boundary VM harness operations are approved.",
         })),
       ]),
     },
@@ -82,6 +89,24 @@ export default defineConfig([
     rules: {
       "no-restricted-imports": ["error", {
         paths: [...restrictedModules, ...moduleLoaders],
+        patterns: [privateSdk, {
+          regex: "(^|/)(docs|test|tests|scripts)(/|$)",
+          message: "Production code must not import tests, scripts or historical evidence.",
+        }],
+      }],
+    },
+  },
+  {
+    // Repository cloning invokes Git with fixed argument arrays and no shell option.
+    files: ["src/repository-clone.ts"],
+    rules: {
+      "no-restricted-imports": ["error", {
+        paths: [
+          ...processLoaders, "vm", "node:vm", ...moduleLoaders,
+          ...["child_process", "node:child_process"].map((name) => ({
+            name, allowImportNames: ["execFile"], message: "Only execFile is approved for repository Git operations.",
+          })),
+        ],
         patterns: [privateSdk, {
           regex: "(^|/)(docs|test|tests|scripts)(/|$)",
           message: "Production code must not import tests, scripts or historical evidence.",

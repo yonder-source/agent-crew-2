@@ -3,7 +3,11 @@ services:
     secrets:
       - source: github_installation_token
         target: agent-crew-github-installation-token
+      - source: github_app_private_key
+        target: agent-crew-github-app-private-key
 
 secrets:
   github_installation_token:
     file: ../../../.local/secrets/github-app-installation-token
+  github_app_private_key:
+    file: ../../../.local/secrets/agent-crew.pem
