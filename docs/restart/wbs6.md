@@ -92,6 +92,9 @@ separate results of duplicate and failure checks from the preceding packages.
 Record live GitHub and Slack evidence separately from fixtures and synthetic
 checks, including the authorization and delivery failure boundaries.
 
+**Live acceptance (2026-11-24):** Passed; see the
+[WBS6 MVP qualification](evidence/wbs6-mvp-qualification.md).
+
 ## 6.5 Developer and operator handoff
 
 **Work:** Document the configuration, local startup and how to inspect workflow
