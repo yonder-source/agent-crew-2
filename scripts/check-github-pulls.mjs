@@ -90,13 +90,34 @@ createResponse = fixture();
 
 createFailure = response({ message: "Validation failed" }, { status: 422 });
 await assert.rejects(provider.create({ ...expected, body }), (error) =>
-  error instanceof GitHubPullRequestError && error.code === "GITHUB_PULL_REQUEST_CREATE_REJECTED");
+  error instanceof GitHubPullRequestError && error.code === "GITHUB_PULL_REQUEST_CREATE_UNCERTAIN");
 createFailure = response({
   message: "Validation Failed",
   errors: [{ resource: "PullRequest", code: "custom", message: "A pull request already exists for owner:openclaw/agent-crew-issue-7." }],
 }, { status: 422 });
 await assert.rejects(provider.create({ ...expected, body }), (error) =>
   error instanceof GitHubPullRequestError && error.code === "GITHUB_PULL_REQUEST_CREATE_UNCERTAIN");
+createFailure = response({
+  message: "Validation Failed",
+  errors: [{ resource: "PullRequest", code: "already_exists", field: "head" }],
+}, { status: 422 });
+await assert.rejects(provider.create({ ...expected, body }), (error) =>
+  error instanceof GitHubPullRequestError && error.code === "GITHUB_PULL_REQUEST_CREATE_UNCERTAIN");
+createFailure = response({
+  message: "Unrecognized provider validation response",
+  errors: [{ resource: "PullRequest", code: "opaque_conflict", field: "head" }],
+}, { status: 422 });
+await assert.rejects(provider.create({ ...expected, body }), (error) =>
+  error instanceof GitHubPullRequestError && error.code === "GITHUB_PULL_REQUEST_CREATE_UNCERTAIN");
+createFailure = response({
+  message: "Validation Failed",
+  errors: [{ resource: "PullRequest", code: "missing_field", field: "head" }],
+}, { status: 422 });
+const missingFieldResult = await provider.create({ ...expected, body }).then(
+  () => "unexpected",
+  (error) => error instanceof GitHubPullRequestError ? error.code : "wrong-type",
+);
+assert.equal(missingFieldResult, "GITHUB_PULL_REQUEST_CREATE_REJECTED");
 createFailure = new Error("SECRET transport detail");
 await assert.rejects(provider.create({ ...expected, body }), (error) =>
   error instanceof GitHubPullRequestError && error.code === "GITHUB_PULL_REQUEST_CREATE_UNCERTAIN" &&

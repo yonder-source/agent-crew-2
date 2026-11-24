@@ -105,6 +105,8 @@ retrying publication cannot replay it just because push was already confirmed.
 Use the same rejected-versus-uncertain classification as push.
 A `422` response is not inherently definitive: a conflict such as an already
 existing pull request must enter inspection and be reconciled before retry.
+Unknown 422 response formats must be inspection, not rejected. Only a
+structured explicit missing/invalid field response may be definitive rejection.
 The Controller records these attempts in `publication.prOperations`, uses a
 fresh repository-scoped pull-requests-write installation token for each PR
 operation, and builds the title/body only from retained Controller state and

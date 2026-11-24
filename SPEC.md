@@ -450,6 +450,9 @@ Lookup the task head across all bases so an existing mismatched-base PR cannot
 look absent. Compare repository canonical identity case-insensitively. A 422
 response that indicates an existing/conflicting PR is uncertain and requires
 inspection; only a definitive rejected operation becomes failed.
+Unknown 422 formats remain uncertain. A 422 is definitive only for an explicit
+missing/invalid-field validation structure; opaque/conflicting formats cannot
+be assumed to prove no write or no existing PR.
 
 Public publication status is `published`, `needs-inspection`, `failed` or
 `abandoned`; only `published` may expose a confirmed PR URL. Preserve coding

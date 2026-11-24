@@ -108,15 +108,29 @@ function requestAllowed(path: string, url: URL, method: string): boolean {
   return url.pathname.toLowerCase() === `${path}/pulls` && method === "POST";
 }
 
-function pullRequestCreateConflict(error: unknown): boolean {
-  if (!isRecord(error) || error.status !== 422) return false;
+type PullRequest422Disposition = "conflict" | "definitive-rejection" | "uncertain";
+
+function pullRequest422Disposition(error: unknown): PullRequest422Disposition {
+  if (!isRecord(error) || error.status !== 422) return "uncertain";
   const response = isRecord(error.response) ? error.response : undefined;
   const data = response && isRecord(response.data) ? response.data : undefined;
   const text = [
     typeof error.message === "string" ? error.message : "",
     data ? JSON.stringify(data) : "",
-  ].join("\n");
-  return /already exists|pull request .*exists|another pull request|head .*already/i.test(text);
+  ].join("\n").toLowerCase();
+  if (/already exists|pull request .*exists|another pull request|head .*already|already_exists|duplicate/.test(text)) {
+    return "conflict";
+  }
+  if (Array.isArray(data?.errors)) {
+    const errors = data.errors.filter(isRecord);
+    if (errors.length > 0 && errors.every((item) => {
+      const code = typeof item.code === "string" ? item.code.toLowerCase() : "";
+      return ["missing", "missing_field", "invalid", "unprocessable"].includes(code);
+    })) {
+      return "definitive-rejection";
+    }
+  }
+  return "uncertain";
 }
 
 async function boundedResponse(response: Response, maximumBytes: number, signal: AbortSignal): Promise<Response> {
@@ -259,10 +273,19 @@ export class OctokitGitHubPullRequestProvider {
         throw new GitHubPullRequestError("GITHUB_PULL_REQUEST_CREATE_UNCERTAIN", "GitHub pull request creation requires inspection.");
       }
       const status = isRecord(error) ? error.status : undefined;
-      if (state.started && status === 422 && pullRequestCreateConflict(error)) {
-        throw new GitHubPullRequestError("GITHUB_PULL_REQUEST_CREATE_UNCERTAIN", "GitHub pull request creation may have an existing conflicting draft; inspect before retrying.");
+      if (state.started && status === 422) {
+        const disposition = pullRequest422Disposition(error);
+        if (disposition === "definitive-rejection") {
+          throw new GitHubPullRequestError("GITHUB_PULL_REQUEST_CREATE_REJECTED", "GitHub rejected pull request creation.");
+        }
+        throw new GitHubPullRequestError(
+          "GITHUB_PULL_REQUEST_CREATE_UNCERTAIN",
+          disposition === "conflict"
+            ? "GitHub pull request creation may have an existing conflicting draft; inspect before retrying."
+            : "GitHub pull request creation returned an unrecognized 422 response; inspect before retrying.",
+        );
       }
-      if (state.started && typeof status === "number" && [400, 401, 403, 404, 422].includes(status)) {
+      if (state.started && typeof status === "number" && [400, 401, 403, 404].includes(status)) {
         throw new GitHubPullRequestError("GITHUB_PULL_REQUEST_CREATE_REJECTED", "GitHub rejected pull request creation.");
       }
       if (state.started) {
