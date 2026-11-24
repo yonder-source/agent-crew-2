@@ -122,6 +122,12 @@ identity, confirmed PR identity/state and operator decisions with issue-session
 metadata. Keep the original coding delivery separate from publication state.
 Expose publication status `published`, `needs-inspection`, `failed` or `abandoned`.
 Only `published` may include a confirmed PR URL in the public result.
+The public result is a separate redacted contract: repository, issue number,
+status, task branch/head, validation outcome, a bounded inspection reason when
+not published, and only the confirmed open-draft PR identity/URL when published.
+It excludes operation IDs, title/body hashes, full PR body, workspace paths,
+session IDs, continuation references and credentials. Status reads and Lobster
+responses use the same result shape.
 
 Return repository/issue identity, publication status, branch/head, validation
 outcome and a bounded inspection reason to trusted Lobster. Return a PR URL only

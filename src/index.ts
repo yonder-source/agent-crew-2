@@ -30,6 +30,7 @@ const NAMESPACE = "agent-crew-job";
 const TASK_ACTIVE_LIMIT_MS = 1_200_000;
 const JOB_STATUSES = ["starting", "active", "waiting", "completed", "needs-inspection", "retry-approved", "abandoned"] as const;
 const WORKFLOW_STATUSES = ["ok", "needs_approval", "needs_input", "cancelled"] as const;
+const PUBLICATION_STATUSES = ["published", "needs-inspection", "failed", "abandoned"] as const;
 type JobStatus = typeof JOB_STATUSES[number];
 type WorkflowStatus = typeof WORKFLOW_STATUSES[number];
 const LOCKED = new Set(["starting", "active", "waiting", "completed", "needs-inspection", "abandoned"]);
@@ -70,6 +71,10 @@ function isJobStatus(value: unknown): value is JobStatus {
 
 function isWorkflowStatus(value: unknown): value is WorkflowStatus {
   return WORKFLOW_STATUSES.some((status) => status === value);
+}
+
+function isPublicPublicationStatus(value: unknown): value is PublicPublicationResult["status"] {
+  return PUBLICATION_STATUSES.some((status) => status === value);
 }
 
 type Issue = { repository: string; number: number };
@@ -148,6 +153,25 @@ type PublicationAcceptance = {
   baseCommit: string;
   headCommit: string;
   validation: CodingDelivery["validation"];
+};
+
+type PublicPublicationResult = {
+  repository: string;
+  issueNumber: number;
+  status: "published" | "needs-inspection" | "failed" | "abandoned";
+  branch: string;
+  headCommit: string;
+  validation: {
+    status: CodingDelivery["validation"]["status"];
+    summary?: string;
+  };
+  inspectionReason?: string;
+  pullRequest?: {
+    number: number;
+    url: string;
+    state: "open";
+    draft: true;
+  };
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -235,6 +259,58 @@ function isJob(value: unknown): value is Job {
     (operation.status === "confirmed" ? operation.pullRequest !== undefined : operation.pullRequest === undefined));
 }
 
+function publicPublicationResult(job: Job): PublicPublicationResult | undefined {
+  if (job.codingDelivery?.status !== "ready" || !job.workspaceBranch) return undefined;
+  const push = job.publication?.pushOperations.at(-1);
+  const pullRequest = job.publication?.prOperations?.at(-1);
+  const confirmedPull = pullRequest?.status === "confirmed" ? pullRequest.pullRequest : undefined;
+  const published = push?.status === "confirmed" && pullRequest?.status === "confirmed" &&
+    confirmedPull?.state === "open" && confirmedPull.draft && !confirmedPull.merged &&
+    confirmedPull.repository === job.repository &&
+    confirmedPull.headRef === job.workspaceBranch &&
+    confirmedPull.headCommit === job.codingDelivery.headCommit &&
+    confirmedPull.baseRef === "main" &&
+    pullRequestUrlMatches(confirmedPull.url, job.repository, confirmedPull.number);
+  const abandoned = push?.status === "abandoned" || pullRequest?.status === "abandoned";
+  const failed = push?.status === "failed" || pullRequest?.status === "failed";
+  const resultStatus = published
+    ? "published"
+    : abandoned
+      ? "abandoned"
+      : failed
+        ? "failed"
+        : "needs-inspection";
+  const reason = pullRequest?.reason ?? push?.reason ??
+    (push === undefined
+      ? "Publication has not started."
+      : push.status !== "confirmed"
+        ? `Branch publication is ${push.status}.`
+        : pullRequest === undefined
+          ? "Branch is confirmed, but pull request publication has not started."
+          : `Pull request publication is ${pullRequest.status}.`);
+  return {
+    repository: job.repository,
+    issueNumber: job.number,
+    status: resultStatus,
+    branch: job.workspaceBranch,
+    headCommit: job.codingDelivery.headCommit,
+    validation: {
+      status: job.codingDelivery.validation.status,
+      ...(job.codingDelivery.validation.summary !== undefined
+        ? { summary: boundedPublicationSummary(job.codingDelivery.validation.summary, 1_000) }
+        : {}),
+    },
+    ...(resultStatus === "published" ? {
+      pullRequest: {
+        number: confirmedPull!.number,
+        url: confirmedPull!.url,
+        state: "open" as const,
+        draft: true as const,
+      },
+    } : { inspectionReason: boundedPublicationSummary(reason, 1_000) }),
+  };
+}
+
 // Explicit output boundary: continuation credentials stay in session metadata.
 function publicJob(job: Job) {
   return {
@@ -259,7 +335,7 @@ function publicJob(job: Job) {
     ...(job.error !== undefined ? { error: "Workflow outcome requires inspection" } : {}),
     ...(job.decision !== undefined ? { decision: job.decision } : {}),
     ...(job.issueUpdate !== undefined ? { issueUpdate: job.issueUpdate } : {}),
-    ...(job.publication !== undefined ? { publication: job.publication } : {}),
+    ...(publicPublicationResult(job) !== undefined ? { publication: publicPublicationResult(job) } : {}),
   };
 }
 
@@ -599,12 +675,61 @@ export default definePluginEntry({
         if (activePublicationPrs.has(previous.operationId)) {
           throw new Error("Draft pull request creation is already in progress.");
         }
-        return {
+        const inspection: PublicationPrOperation = {
           ...previous,
           status: "needs-inspection",
           reason: "Pull request creation was unfinished when the Gateway stopped; inspect GitHub.",
           updatedAt: new Date().toISOString(),
         };
+        await updatePublicationPr(issue, inspection);
+        return inspection;
+      }
+      if (previous?.status === "confirmed") {
+        const operation = previous;
+        try {
+          assertCurrent();
+          const assignedIssue = await issueProvider.readIssue(issue.repository, issue.number);
+          assertCurrent();
+          if (assignedIssue.number !== issue.number || assignedIssue.repository !== issue.repository ||
+              assignedIssue.state !== "open" ||
+              createHash("sha256").update(assignedIssue.title).digest("hex") !== operation.titleHash) {
+            throw new GitHubPullRequestError(
+              "GITHUB_PULL_REQUEST_MISMATCH",
+              "Retained pull request identity no longer matches the assigned issue.",
+            );
+          }
+          const existing = await pullRequestProvider.findExisting({
+            repository: accepted.repository,
+            issueNumber: issue.number,
+            issueTitle: assignedIssue.title,
+            headRef: accepted.workspaceBranch,
+            headCommit: accepted.headCommit,
+            baseRef: "main",
+          });
+          if (!existing) {
+            throw new GitHubPullRequestError(
+              "GITHUB_PULL_REQUEST_MISMATCH",
+              "The confirmed pull request could not be found.",
+            );
+          }
+          const confirmed: PublicationPrOperation = {
+            ...operation,
+            pullRequest: existing,
+            updatedAt: new Date().toISOString(),
+          };
+          await updatePublicationPr(issue, confirmed);
+          return confirmed;
+        } catch {
+          const inspection: PublicationPrOperation = {
+            ...operation,
+            status: "needs-inspection",
+            reason: "The retained pull request no longer has a confirmed remote identity; inspect before retrying.",
+            updatedAt: new Date().toISOString(),
+          };
+          delete inspection.pullRequest;
+          await updatePublicationPr(issue, inspection);
+          return inspection;
+        }
       }
       if (previous && previous.status !== "retry-approved") return previous;
 
@@ -879,7 +1004,26 @@ export default definePluginEntry({
           : undefined;
         if (!isRecord(response) || response.ok !== true || details?.ok !== true ||
             details.status !== "ok" || !isRecord(publication) ||
-            typeof publication.status !== "string") {
+            !isPublicPublicationStatus(publication.status) ||
+            publication.repository !== job.repository ||
+            publication.issueNumber !== job.number ||
+            publication.branch !== job.workspaceBranch ||
+            publication.headCommit !== job.codingDelivery.headCommit ||
+            !isRecord(publication.validation) ||
+            publication.validation.status !== job.codingDelivery.validation.status ||
+            (publication.status === "published" && (
+              !isRecord(publication.pullRequest) ||
+              !pullRequestUrlMatches(
+                publication.pullRequest.url,
+                job.repository,
+                typeof publication.pullRequest.number === "number"
+                  ? publication.pullRequest.number
+                  : 0,
+              ) ||
+              publication.pullRequest.state !== "open" ||
+              publication.pullRequest.draft !== true
+            )) ||
+            (publication.status !== "published" && publication.pullRequest !== undefined)) {
           throw new Error("Lobster publication result was invalid.");
         }
         return await readJob(issue) ?? job;
@@ -1494,16 +1638,18 @@ export default definePluginEntry({
           const accepted = publicationAcceptance(retained);
           const issue = { repository: retained.repository, number: retained.number };
           const previous = latestPublicationPush(retained);
-          const respondAfterConfirmedPush = async (job: Job, push: PublicationPushOperation) => {
-            const pullRequest = await ensurePublicationPr(
+          const respondPublication = (job: Job) => {
+            const result = publicPublicationResult(job);
+            if (!result) throw new Error("Retained publication result is incomplete.");
+            respond(true, result);
+          };
+          const respondAfterConfirmedPush = async (job: Job) => {
+            await ensurePublicationPr(
               issue, accepted, job, () => sessionAccessAuthority.assertCurrent(),
             );
-            respond(true, {
-              status: pullRequest.status,
-              publication: accepted,
-              push,
-              pullRequest,
-            });
+            const current = await readJob(issue);
+            if (!current) throw new Error("Retained publication result is unavailable.");
+            respondPublication(current);
           };
           if (previous?.status === "writing") {
             if (activePublicationPushes.has(previous.operationId)) {
@@ -1515,15 +1661,14 @@ export default definePluginEntry({
               reason: "Push was unfinished when the Gateway stopped; inspect the remote branch.",
               updatedAt: new Date().toISOString(),
             };
-            await updatePublicationPush(retained, inspection);
-            respond(true, { status: inspection.status, publication: accepted, push: inspection });
+            respondPublication(await updatePublicationPush(retained, inspection));
             return;
           }
           if (previous && previous.status !== "retry-approved") {
             if (previous.status === "confirmed") {
-              await respondAfterConfirmedPush(retained, previous);
+              await respondAfterConfirmedPush(retained);
             } else {
-              respond(true, { status: previous.status, publication: accepted, push: previous });
+              respondPublication(retained);
             }
             return;
           }
@@ -1549,8 +1694,7 @@ export default definePluginEntry({
               ...operation,
               reason: "Worktree, branch, base ancestry, clean state or exact head verification failed.",
             };
-            await updatePublicationPush(retained, blocked);
-            respond(true, { status: blocked.status, publication: accepted, push: blocked });
+            respondPublication(await updatePublicationPush(retained, blocked));
             return;
           }
           sessionAccessAuthority.assertCurrent();
@@ -1568,8 +1712,7 @@ export default definePluginEntry({
               status: "failed",
               reason: "GitHub publication credentials were unavailable.",
             };
-            await updatePublicationPush(retained, failed);
-            respond(true, { status: failed.status, publication: accepted, push: failed });
+            respondPublication(await updatePublicationPush(retained, failed));
             return;
           }
           sessionAccessAuthority.assertCurrent();
@@ -1586,8 +1729,7 @@ export default definePluginEntry({
               ...operation,
               reason: "Existing remote task branch could not be inspected unambiguously.",
             };
-            await updatePublicationPush(retained, inspection);
-            respond(true, { status: inspection.status, publication: accepted, push: inspection });
+            respondPublication(await updatePublicationPush(retained, inspection));
             return;
           }
           sessionAccessAuthority.assertCurrent();
@@ -1600,9 +1742,9 @@ export default definePluginEntry({
               };
             const matchingJob = await updatePublicationPush(retained, matching);
             if (matching.status === "confirmed") {
-              await respondAfterConfirmedPush(matchingJob, matching);
+              await respondAfterConfirmedPush(matchingJob);
             } else {
-              respond(true, { status: matching.status, publication: accepted, push: matching });
+              respondPublication(matchingJob);
             }
             return;
           }
@@ -1647,8 +1789,7 @@ export default definePluginEntry({
                     : "Branch push outcome is uncertain or the remote branch changed; inspect before retrying.",
                 updatedAt: new Date().toISOString(),
               };
-              await updatePublicationPush(retained, failed);
-              respond(true, { status: failed.status, publication: accepted, push: failed });
+              respondPublication(await updatePublicationPush(retained, failed));
               return;
             }
             sessionAccessAuthority.assertCurrent();
@@ -1658,7 +1799,7 @@ export default definePluginEntry({
               updatedAt: new Date().toISOString(),
             };
             const confirmedJob = await updatePublicationPush(retained, confirmed);
-            await respondAfterConfirmedPush(confirmedJob, confirmed);
+            await respondAfterConfirmedPush(confirmedJob);
           } finally {
             activePublicationPushes.delete(writing.operationId);
           }

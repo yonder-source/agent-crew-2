@@ -116,7 +116,7 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
     OctokitGitHubPullRequestProvider: class {
       async findExisting(options) {
         const retained = session.pluginExtensions[0].value.publication.prOperations.at(-1);
-        assert.equal(retained.status, "needs-inspection",
+        assert.ok(["needs-inspection", "confirmed"].includes(retained.status),
           "A retained PR lookup boundary must exist before external PR inspection");
         calls.push({ method: "pull-request-lookup", params: options });
         if (pullRequestMode === "lookup-uncertain") {
@@ -125,13 +125,17 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
         if (pullRequestMode === "lookup-mismatch") {
           throw new context.GitHubPullRequestError("GITHUB_PULL_REQUEST_MISMATCH", "Fixture mismatch");
         }
-        if (pullRequestMode === "existing") return {
+        if (pullRequestMode === "existing" || pullRequestMode === "created") return {
           repository: options.repository, id: 123, number: 77,
           url: `https://github.com/${options.repository}/pull/77`,
           title: options.issueTitle, body: "Fixture existing draft\n\nFixes #7",
           state: "open", draft: true, merged: false,
           baseRef: options.baseRef, headRef: options.headRef, headCommit: options.headCommit,
         };
+        const confirmed = session.pluginExtensions[0].value.publication.prOperations.at(-1);
+        if (pullRequestMode !== "missing" && confirmed?.status === "confirmed") {
+          return confirmed.pullRequest;
+        }
         return undefined;
       }
       async create(options) {
@@ -332,32 +336,41 @@ const acceptedPublication = await success.method("agent-crew.publication.accept"
   sessionKey: first.value.job.sessionKey, jobId: "caller-supplied-job", headCommit: "c".repeat(40),
 });
 assert.equal(acceptedPublication.ok, true);
-assert.equal(acceptedPublication.value.status, "confirmed");
-assert.deepEqual(JSON.parse(JSON.stringify(acceptedPublication.value.publication)), {
+assert.equal(acceptedPublication.value.status, "published", JSON.stringify(acceptedPublication.value));
+assert.deepEqual(JSON.parse(JSON.stringify(acceptedPublication.value)), {
   repository: "owner/repo",
   issueNumber: 7,
-  jobId: first.value.job.jobId,
-  sessionKey: first.value.job.sessionKey,
-  codingRunId: "run-7",
-  workspacePath,
-  workspaceBranch: branch,
-  baseCommit: "a".repeat(40),
+  status: "published",
+  branch,
   headCommit: "b".repeat(40),
-  validation: first.value.job.codingDelivery.validation,
+  validation: { status: "ok" },
+  pullRequest: {
+    number: 78,
+    url: "https://github.com/owner/repo/pull/78",
+    state: "open",
+    draft: true,
+  },
 });
-assert.equal(acceptedPublication.value.push.status, "confirmed");
-assert.equal(acceptedPublication.value.push.repository, "owner/repo");
-assert.equal(acceptedPublication.value.push.ref, `refs/heads/${branch}`);
-assert.equal(acceptedPublication.value.push.headCommit, "b".repeat(40));
-assert.equal(acceptedPublication.value.pullRequest.status, "confirmed");
-assert.equal(acceptedPublication.value.pullRequest.pullRequest.number, 78);
-assert.match(acceptedPublication.value.pullRequest.pullRequest.body, /Fixes #7/);
+assert.equal(JSON.stringify(acceptedPublication.value).includes("operationId"), false);
+assert.equal(JSON.stringify(acceptedPublication.value).includes("titleHash"), false);
+assert.equal(JSON.stringify(acceptedPublication.value).includes("bodyHash"), false);
+assert.equal(success.session().pluginExtensions[0].value.publication.pushOperations.at(-1).status, "confirmed");
+assert.equal(success.session().pluginExtensions[0].value.publication.prOperations.at(-1).status, "confirmed");
+assert.match(success.session().pluginExtensions[0].value.publication.prOperations.at(-1).pullRequest.body, /Fixes #7/);
+assert.deepEqual(JSON.parse(JSON.stringify(first.value.job.publication)),
+  JSON.parse(JSON.stringify(acceptedPublication.value)));
+const publishedStatus = (await success.status()).details.job.publication;
+assert.deepEqual(JSON.parse(JSON.stringify(publishedStatus)),
+  JSON.parse(JSON.stringify(acceptedPublication.value)));
+assert.equal(JSON.stringify(publishedStatus).includes("fixture-token"), false);
+assert.equal(JSON.stringify(publishedStatus).includes("operationId"), false);
 assert.equal(success.calls.find(call => call.method === "verify-publication")
   .params.expectedHead, "b".repeat(40));
 assert.equal(success.calls.filter(call => call.method === "push-task-branch").length, 1);
 assert.equal(success.calls.find(call => call.method === "push-task-branch")
   .params.token, "fixture-token");
-assert.equal(success.calls.filter(call => call.method === "pull-request-lookup").length, 1);
+assert.equal(success.calls.filter(call => call.method === "pull-request-lookup").length, 2,
+  "The direct publication call revalidates the remote PR without recreating it");
 assert.equal(success.calls.filter(call => call.method === "pull-request-create").length, 1);
 assert.equal((await success.method("agent-crew.publication.accept", {
   sessionKey: "agent:coding:other",
@@ -407,11 +420,24 @@ assert.equal(success.calls.filter(call => call.method === "tools.invoke" &&
   call.params.args.pipeline === "workflows/coding-issue.lobster").length, 1);
 assert.equal((await success.method("agent-crew.publication.accept", {
   sessionKey: first.value.job.sessionKey,
-})).value.status, "confirmed");
+})).value.status, "published");
 assert.equal(success.calls.filter(call => call.method === "push-task-branch").length, 1,
   "Repeated publication must not replay a confirmed push");
 assert.equal(success.calls.filter(call => call.method === "pull-request-create").length, 1,
   "Repeated publication must not duplicate a confirmed draft PR");
+const remoteIdentityLost = harness(structuredClone(success.session()));
+const confirmedLookup = remoteIdentityLost.method("agent-crew.publication.accept", {
+  sessionKey: first.value.job.sessionKey,
+});
+assert.equal((await confirmedLookup).value.status, "published");
+remoteIdentityLost.setPullRequestMode("missing");
+const missingRemoteDraft = await remoteIdentityLost.method("agent-crew.publication.accept", {
+  sessionKey: first.value.job.sessionKey,
+});
+assert.equal(missingRemoteDraft.value.status, "needs-inspection");
+assert.equal(missingRemoteDraft.value.pullRequest, undefined);
+assert.equal(remoteIdentityLost.calls.filter(call => call.method === "pull-request-create").length, 0,
+  "Remote PR revalidation failure must never blindly create a replacement");
 
 const failed = harness();
 failed.setCoding("error", "Coding failed");
@@ -455,7 +481,8 @@ const blockedPush = await blockedPublication.method("agent-crew.publication.acce
   sessionKey: blockedJob.sessionKey,
 });
 assert.equal(blockedPush.value.status, "needs-inspection");
-assert.match(blockedPush.value.push.reason, /Worktree/);
+assert.match(blockedPush.value.inspectionReason, /Worktree/);
+assert.equal(blockedPush.value.pullRequest, undefined);
 assert.equal(blockedPublication.calls.filter(call => call.method === "push-task-branch").length, 0);
 
 const matchingRemote = harness();
@@ -464,7 +491,7 @@ const matchingJob = (await matchingRemote.method("agent-crew.dispatch", issue)).
 const alreadyPresent = await matchingRemote.method("agent-crew.publication.accept", {
   sessionKey: matchingJob.sessionKey,
 });
-assert.equal(alreadyPresent.value.status, "confirmed");
+assert.equal(alreadyPresent.value.status, "published");
 assert.equal(matchingRemote.calls.filter(call => call.method === "push-task-branch").length, 0,
   "An exact existing remote head is confirmed without another push");
 
@@ -475,7 +502,7 @@ const incompatiblePush = await incompatibleRemote.method("agent-crew.publication
   sessionKey: incompatibleJob.sessionKey,
 });
 assert.equal(incompatiblePush.value.status, "needs-inspection");
-assert.match(incompatiblePush.value.push.reason, /incompatible head/);
+assert.match(incompatiblePush.value.inspectionReason, /incompatible head/);
 assert.equal(incompatibleRemote.calls.filter(call => call.method === "push-task-branch").length, 0);
 
 const uncertainPublication = harness();
@@ -485,7 +512,7 @@ const uncertainPush = await uncertainPublication.method("agent-crew.publication.
   sessionKey: uncertainJob.sessionKey,
 });
 assert.equal(uncertainPush.value.status, "needs-inspection");
-assert.equal(uncertainPush.value.push.status, "needs-inspection");
+assert.equal(uncertainPush.value.pullRequest, undefined);
 assert.equal((await uncertainPublication.method("agent-crew.publication.accept", {
   sessionKey: uncertainJob.sessionKey,
 })).value.status, "needs-inspection");
@@ -495,13 +522,15 @@ const approvedPushRetry = await uncertainPublication.method("agent-crew.resolve"
   ...issue, target: "publication-push", decision: "retry", note: "Remote branch inspected and push may be retried",
 });
 assert.equal(approvedPushRetry.ok, true);
-assert.equal(approvedPushRetry.value.job.publication.pushOperations.at(-1).status, "retry-approved");
+assert.equal(uncertainPublication.session().pluginExtensions[0].value.publication.pushOperations.at(-1).status,
+  "retry-approved");
 uncertainPublication.allowTaskPush();
 const retriedPush = await uncertainPublication.method("agent-crew.publication.accept", {
   sessionKey: uncertainJob.sessionKey,
 });
-assert.equal(retriedPush.value.status, "confirmed");
-assert.equal(retriedPush.value.push.operationId !== uncertainPush.value.push.operationId, true);
+assert.equal(retriedPush.value.status, "published");
+assert.equal(uncertainPublication.session().pluginExtensions[0].value.publication.pushOperations.at(-1).operationId
+  !== uncertainPublication.session().pluginExtensions[0].value.publication.pushOperations.at(-2).operationId, true);
 assert.equal(uncertainPublication.session().pluginExtensions[0].value.publication.pushOperations.length, 2);
 
 const rejectedPublication = harness();
@@ -511,28 +540,32 @@ const rejectedPush = await rejectedPublication.method("agent-crew.publication.ac
   sessionKey: rejectedJob.sessionKey,
 });
 assert.equal(rejectedPush.value.status, "failed");
+assert.equal(rejectedPush.value.pullRequest, undefined);
+assert.match(rejectedPush.value.inspectionReason, /rejected/);
 
 const existingDraft = harness();
 existingDraft.setPullRequestMode("existing");
 const existingDraftJob = (await existingDraft.method("agent-crew.dispatch", issue)).value.job;
-assert.equal(existingDraftJob.publication.prOperations.at(-1).status, "confirmed");
-assert.equal(existingDraftJob.publication.prOperations.at(-1).pullRequest.number, 77);
+assert.equal(existingDraftJob.publication.status, "published");
+assert.equal(existingDraftJob.publication.pullRequest.number, 77);
 assert.equal(existingDraft.calls.filter(call => call.method === "pull-request-create").length, 0);
 
 const mismatchedDraft = harness();
 mismatchedDraft.setPullRequestMode("lookup-mismatch");
 const mismatchedDraftJob = (await mismatchedDraft.method("agent-crew.dispatch", issue)).value.job;
-assert.equal(mismatchedDraftJob.publication.prOperations.at(-1).status, "needs-inspection");
+assert.equal(mismatchedDraftJob.publication.status, "needs-inspection");
+assert.equal(mismatchedDraftJob.publication.pullRequest, undefined);
 assert.equal(mismatchedDraft.calls.filter(call => call.method === "pull-request-create").length, 0);
 
 const uncertainDraft = harness();
 uncertainDraft.setPullRequestMode("create-uncertain");
 const uncertainDraftJob = (await uncertainDraft.method("agent-crew.dispatch", issue)).value.job;
-const uncertainDraftOperation = uncertainDraftJob.publication.prOperations.at(-1);
+const uncertainDraftOperation =
+  uncertainDraft.session().pluginExtensions[0].value.publication.prOperations.at(-1);
 assert.equal(uncertainDraftOperation.status, "needs-inspection");
 assert.equal((await uncertainDraft.method("agent-crew.publication.accept", {
   sessionKey: uncertainDraftJob.sessionKey,
-})).value.pullRequest.status, "needs-inspection");
+})).value.status, "needs-inspection");
 assert.equal(uncertainDraft.calls.filter(call => call.method === "pull-request-create").length, 1,
   "An uncertain PR create must not replay automatically");
 assert.equal((await uncertainDraft.method("agent-crew.resolve", {
@@ -543,14 +576,31 @@ uncertainDraft.setPullRequestMode();
 const retriedDraft = (await uncertainDraft.method("agent-crew.publication.accept", {
   sessionKey: uncertainDraftJob.sessionKey,
 })).value;
-assert.equal(retriedDraft.pullRequest.status, "confirmed");
-assert.notEqual(retriedDraft.pullRequest.operationId, uncertainDraftOperation.operationId);
+assert.equal(retriedDraft.status, "published");
+assert.notEqual(uncertainDraft.session().pluginExtensions[0].value.publication.prOperations.at(-1).operationId,
+  uncertainDraftOperation.operationId);
 assert.equal(uncertainDraft.session().pluginExtensions[0].value.publication.prOperations.length, 2);
 
 const rejectedDraft = harness();
 rejectedDraft.setPullRequestMode("create-rejected");
 const rejectedDraftJob = (await rejectedDraft.method("agent-crew.dispatch", issue)).value.job;
-assert.equal(rejectedDraftJob.publication.prOperations.at(-1).status, "failed");
+assert.equal(rejectedDraftJob.publication.status, "failed");
+assert.equal(rejectedDraftJob.publication.pullRequest, undefined);
+assert.match(rejectedDraftJob.publication.inspectionReason, /rejected/);
+
+const abandonedDraft = harness();
+abandonedDraft.setPullRequestMode("create-uncertain");
+const abandonedDraftJob = (await abandonedDraft.method("agent-crew.dispatch", issue)).value.job;
+assert.equal((await abandonedDraft.method("agent-crew.resolve", {
+  ...issue, target: "publication-pr", decision: "abandon",
+  note: "Operator chose not to publish this draft",
+})).ok, true);
+const abandonedResult = (await abandonedDraft.method("agent-crew.publication.accept", {
+  sessionKey: abandonedDraftJob.sessionKey,
+})).value;
+assert.equal(abandonedResult.status, "abandoned");
+assert.equal(abandonedResult.pullRequest, undefined);
+assert.equal(abandonedDraft.calls.filter(call => call.method === "pull-request-create").length, 1);
 
 const interruptedPushSnapshot = structuredClone(success.session());
 const interruptedPush = interruptedPushSnapshot.pluginExtensions[0].value.publication.pushOperations.at(-1);
@@ -561,7 +611,7 @@ const interruptedResult = await interruptedPushRestart.method("agent-crew.public
   sessionKey: first.value.job.sessionKey,
 });
 assert.equal(interruptedResult.value.status, "needs-inspection");
-assert.match(interruptedResult.value.push.reason, /Gateway stopped/);
+assert.match(interruptedResult.value.inspectionReason, /Gateway stopped/);
 assert.equal(interruptedPushRestart.calls.filter(call => call.method === "push-task-branch").length, 0);
 
 const interruptedPrSnapshot = structuredClone(success.session());
@@ -572,8 +622,8 @@ const interruptedPrRestart = harness(interruptedPrSnapshot);
 const interruptedPrResult = await interruptedPrRestart.method("agent-crew.publication.accept", {
   sessionKey: first.value.job.sessionKey,
 });
-assert.equal(interruptedPrResult.value.pullRequest.status, "needs-inspection");
-assert.match(interruptedPrResult.value.pullRequest.reason, /Gateway stopped/);
+assert.equal(interruptedPrResult.value.status, "needs-inspection");
+assert.match(interruptedPrResult.value.inspectionReason, /Gateway stopped/);
 assert.equal(interruptedPrRestart.calls.filter(call => call.method === "pull-request-create").length, 0);
 
 const orphan = harness({

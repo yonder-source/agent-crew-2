@@ -41,7 +41,13 @@ try {
 const argv=process.argv.slice(2);
 if(argv[0]==='gateway'){
   fs.writeFileSync(${JSON.stringify(publicationCaptured)},JSON.stringify(argv));
-  console.log(JSON.stringify({status:'confirmed',push:{operationId:'fixture-operation'}}));
+  console.log(JSON.stringify({
+    repository:'owner/repo',issueNumber:1,status:'published',
+    branch:'openclaw/agent-crew-issue-1',headCommit:'${"b".repeat(40)}',
+    validation:{status:'ok'},pullRequest:{
+      number:8,url:'https://github.com/owner/repo/pull/8',state:'open',draft:true,
+    },
+  }));
   process.exit(0);
 }
 fs.writeFileSync(${JSON.stringify(captured)},JSON.stringify(argv));
@@ -73,7 +79,12 @@ console.log(JSON.stringify({runId:'fixture-run',status:'ok',result:{meta:{agentM
   });
   assert.equal(publication.status, 0, publication.stderr || publication.stdout);
   const publicationEnvelope = JSON.parse(publication.stdout);
-  assert.deepEqual(publicationEnvelope.output, [{ status: "confirmed", push: { operationId: "fixture-operation" } }]);
+  assert.deepEqual(publicationEnvelope.output, [{
+    repository: "owner/repo", issueNumber: 1, status: "published",
+    branch: "openclaw/agent-crew-issue-1", headCommit: "b".repeat(40),
+    validation: { status: "ok" },
+    pullRequest: { number: 8, url: "https://github.com/owner/repo/pull/8", state: "open", draft: true },
+  }]);
   const publicationArgv = JSON.parse(await readFile(publicationCaptured, "utf8"));
   assert.deepEqual(publicationArgv.slice(0, 4), [
     "gateway", "call", "agent-crew.publication.accept", "--params",

@@ -453,8 +453,14 @@ inspection; only a definitive rejected operation becomes failed.
 
 Public publication status is `published`, `needs-inspection`, `failed` or
 `abandoned`; only `published` may expose a confirmed PR URL. Preserve coding
-delivery separately from publication, and keep public results free of internal
-credentials. WBS6 consumes this result for Slack reporting: delivery failure
+delivery separately from publication. The shared public result contains only
+repository, issue, status, task branch/head, validation outcome, a bounded
+inspection reason and a confirmed open-draft PR identity/URL when published.
+Exclude operation IDs, hashes, full PR body, workspace/session identity,
+continuation references and credentials. Revalidate a retained confirmed PR
+read-only on later publication reporting; stale or ambiguous remote identity
+becomes inspection and cannot trigger replacement creation. WBS6 consumes this
+result for Slack reporting: delivery failure
 or delivery-only retry must not rerun coding, push or PR creation. Implementation
 and live publication acceptance belong to [WBS5](docs/restart/wbs5.md).
 
