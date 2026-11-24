@@ -134,13 +134,15 @@ registers the task-bound `/grill` slash command and qualifies Slack button
 interactions through the pinned plugin before relying on them.
 The setup draft validates each configured Slack role before Apply: require a
 configured agent, channel ID and nonempty authorized user ID list, verify that
-the bot belongs to an active channel, and verify active human user accounts.
+the bot belongs to an active channel, and verify authorized users are active
+human accounts, excluding deleted users, bots and Slack app users.
 When GitHub issue discovery is configured, require a coding Slack role whose
 agent ID matches the configured coding agent; require readable bot/app secret
 files and a running, connected native Slack transport before Apply or polling.
 At every runtime polling resume and coding dispatch, recheck the bot's current
 membership in the configured coding channel, that the channel is not archived,
-and that each authorized user remains an active human account. A failed or
+and that each authorized user remains an active human account, not a Slack app
+user. A failed or
 unavailable check blocks polling resume and coding admission; setup-time
 validation alone is insufficient because Slack membership and account state
 can change while the Gateway is running.
@@ -177,10 +179,14 @@ the Controller creates and retains one task root message before coding starts,
 including its channel, agent and authorized user IDs. Resume reuses that thread
 and rejects changed Slack settings. A confirmed waiting question is sent as a
 plain-text reply in the retained thread; its run ID and delivery state are
-persisted. Root creation and input-request sends record an intent before the
-write. Failed or unacknowledged root creation blocks coding for inspection;
-failed input delivery leaves the task waiting. Lost metadata acknowledgements
-retain the sending marker and never trigger automatic replay. A native `before_dispatch` claim handler routes authenticated Slack thread
+persisted. Each input or progress delivery retains its operation ID, target
+channel/thread, message, attempt count and state before each write. Allow one
+initial attempt and at most three retries; exhausted input delivery remains
+visible while the task stays waiting. Uncertain delivery can be retried by an
+operator through the delivery-only recovery method within the same attempt
+limit, and may produce a duplicate. Recovery never reruns coding or publication.
+Failed or unacknowledged root creation blocks coding for inspection. A native
+`before_dispatch` claim handler routes authenticated Slack thread
 replies through the Controller resume seam. It derives user, account, channel,
 thread and message identity from host context, matches exactly one retained task,
 and rechecks authorization when dispatch is serialized. Only a successfully sent
@@ -192,7 +198,10 @@ when coding Slack settings are present. Replies predating the current native
 Slack connection must be resent. This ingress path passed a real authorized-human Slack reply and same-task
 resumption qualification, including validated committed delivery and replay
 protection. Native admission is enabled only for the configured coding channel
-and authorized user allowlist. Provider
+and authorized user allowlist. Controller progress updates report only
+observable milestones; the current combined coding turn does not expose a
+separate implementation-complete or validation-start event.
+
 The Controller accumulates reported per-turn totals in taskTokenUsage and
 checks an optional coding.tokenBudget between turns. The setup draft accepts
 a positive integer or an empty value to leave the limit unconfigured. Snapshot
@@ -238,7 +247,11 @@ thread when coding starts, implementation completes and validation starts,
 validation completes, the task waits for human input, and the task completes or
 requires operator inspection. These are event-based updates; WBS6 adds no
 periodic progress timer. Apply the same bounded retry policy to progress updates;
-delivery retries never rerun coding or publication. The integrated workflow
+delivery retries never rerun coding or publication. The completion report names
+the assigned issue and publication status; it includes a draft PR URL only when
+the retained publication result is confirmed as `published`. A failed or
+uncertain publication report must not imply that a PR exists. Polling resume
+shares Apply's guard against an in-progress setup or pending task dispatch. The integrated workflow
 covers normal transitions; fixtures cover waiting and operator inspection.
 
 ### Designer issue grilling

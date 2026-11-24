@@ -61,7 +61,8 @@ export async function validateSlackSettings(settings: SlackSettings,
         try {
           const { user } = await api("users.info", "user", id);
           ready = typeof user === "object" && user !== null && "id" in user && user.id === id &&
-            "deleted" in user && user.deleted === false && "is_bot" in user && user.is_bot === false;
+            "deleted" in user && user.deleted === false && "is_bot" in user && user.is_bot === false &&
+            "is_app_user" in user && user.is_app_user === false;
         } catch { /* Static operator feedback below. */ }
         users.set(id, ready);
       }

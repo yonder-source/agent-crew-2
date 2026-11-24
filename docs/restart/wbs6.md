@@ -47,32 +47,36 @@ restart. Keep delivery outcomes separate from coding and publication outcomes;
 delivery-only recovery must not rerun coding, push or PR creation.
 
 Post Controller-owned progress updates in the task's retained Slack thread at
-these observed transitions: coding starts, implementation completes and
-validation starts, validation completes, the task enters waiting for human
-input, and the task completes or requires operator inspection. Report only
-transitions that occur. Do not ask the coding agent to send arbitrary progress
-messages or add a periodic timer. Apply the same bounded delivery retry policy
-to progress updates; a retry must not repeat coding or publication work.
+these observed transitions: coding starts, coding workflow returns, validation
+result is classified, the task enters waiting for human input, and the task
+completes or requires operator inspection. Report only transitions that occur.
+Do not ask the coding agent to send arbitrary progress messages or add a
+periodic timer. The current combined coding turn does not expose implementation
+completion and validation start separately; do not report those as observed
+until the workflow provides those events. Apply the same bounded delivery retry
+policy to progress updates; a retry must not repeat coding or publication work.
 
 **Done when:** A test workflow produces a Slack message identifying the issue
 and its status. Exercise delivery failure, retry limits and uncertain delivery;
 failure remains visible and does not misrepresent workflow or publication outcome.
-Fixtures cover restart retention, duplicate events, retry exhaustion and
-delivery-only recovery without coding or publication side effects. Exercise the
-normal transitions in the integrated workflow; fixtures cover waiting and
-operator-inspection transitions without requiring them in every workflow.
+Fixtures cover operation identity/target/attempt retention, restart recovery,
+duplicate events, retry exhaustion and delivery-only recovery without coding
+or publication side effects. Exercise the observed transitions in the
+integrated workflow; fixtures cover waiting and operator-inspection transitions
+without requiring them in every workflow.
 See [Slack delivery failures](../../SPEC.md#error-slack).
 
 ## 6.3 Report the draft PR
 
 **Work:** Connect the WBS5 publication result to Slack reporting. Include the
-assigned issue and draft PR URL.
+assigned issue and publication status; include a draft PR URL only when the
+retained result confirms publication.
 
 **Done when:** A successful publication produces a Slack message with the
-correct issue and PR link. An unsuccessful publication reports its status
-without claiming a PR was created. Include a PR URL only for the confirmed
-`published` result; exclude credentials and internal operation details from
-Slack messages.
+correct issue and confirmed PR link. An unsuccessful or uncertain publication
+reports its status without claiming a PR was created. Include a PR URL only for
+the confirmed `published` result; exclude credentials and internal operation
+details from Slack messages.
 See [workflow failures](../../SPEC.md#error-workflow).
 
 ## 6.4 Exercise the MVP workflow
