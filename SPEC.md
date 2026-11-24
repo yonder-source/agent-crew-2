@@ -422,7 +422,10 @@ alone does not invalidate the recorded task base. Create a missing remote task
 ref atomically with an empty-expectation lease that requires it to remain
 absent; this cannot update an existing ref, and a competing creation cannot be
 fast-forwarded. Push to an explicit URL derived from the configured repository
-rather than an arbitrary `remote.origin.pushurl`.
+rather than an arbitrary `remote.origin.pushurl`. Run network publication Git
+operations from a temporary isolated repository that references the verified
+worktree's objects, so local `url.*.pushInsteadOf` and other checkout URL
+rewrites cannot redirect the write.
 The Controller retains the delivery only after the coding workflow has returned
 and the native run is confirmed stopped. A separate trusted Lobster publication
 workflow then invokes publication. Retain the native coding session ID and

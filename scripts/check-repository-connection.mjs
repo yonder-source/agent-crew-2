@@ -211,7 +211,8 @@ try {
 const args=process.argv.slice(2);const f=args.indexOf('fetch');
 if(f>=0){const o=args.indexOf('origin',f);if(o>=0)args[o]=${JSON.stringify(remote)};}
 const u=args.indexOf('https://github.com/owner/repo.git');
-if(u>=0)args[u]=${JSON.stringify(remote)};
+const c=args.indexOf('-C');const cwd=c>=0?args[c+1]:'';
+if(u>=0&&cwd.includes('agent-crew-publication-'))args[u]=${JSON.stringify(remote)};
 const r=spawnSync('/usr/bin/git',args,{stdio:'inherit'});process.exit(r.status??1);\n`);
   await chmod(wrapper, 0o700);
   process.env.PATH = `${bin}:${originalPath ?? "/usr/bin:/bin"}`;
@@ -308,6 +309,7 @@ const r=spawnSync('/usr/bin/git',args,{stdio:'inherit'});process.exit(r.status??
   const wrongRemote = join(taskRoot, "wrong-remote.git");
   gitFixture(taskRoot, "init", "--bare", "--initial-branch=main", wrongRemote);
   gitFixture(workspacePath, "remote", "set-url", "--push", "origin", wrongRemote);
+  gitFixture(workspacePath, "config", `url.${wrongRemote}.pushInsteadOf`, "https://github.com/owner/repo.git");
   assert.equal(await inspectTaskRemoteHead(publication), undefined);
   await pushTaskBranch(publication);
   assert.equal(await inspectTaskRemoteHead(publication), taskHead,

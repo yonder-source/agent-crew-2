@@ -60,7 +60,10 @@ requiring the ref to remain absent, so a competing create is not fast-forwarded
 and an existing ref cannot be updated. Push to an explicit repository URL
 derived from Controller configuration; do not consume an independently
 configured `remote.origin.pushurl`. The controller records each attempt in
-`publication.pushOperations`.
+`publication.pushOperations`. Run remote inspection and push from an isolated
+temporary Git repository that references the verified worktree's objects; the
+task checkout's `url.*.pushInsteadOf` and other URL rewrite configuration must
+not control the publication destination.
 
 Persist a distinct push operation ID, intended repository/ref/head and `writing`
 marker before dispatching the external write. Confirm the remote outcome before

@@ -1,4 +1,4 @@
-import { chmod, lstat, mkdir, mkdtemp, realpath, rename, rm, stat } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -349,6 +349,30 @@ async function authenticatedTaskGit(options: {
   }
 }
 
+async function withIsolatedPublicationGit<T>(
+  workspacePath: string,
+  operation: (repositoryPath: string) => Promise<T>,
+): Promise<T> {
+  const repositoryPath = await mkdtemp(join(tmpdir(), "agent-crew-publication-"));
+  try {
+    await execFile("git", ["init", "--bare", "--quiet", repositoryPath], {
+      timeout: 10_000,
+      maxBuffer: 64_000,
+      env: gitEnvironment(),
+    });
+    const objectsDirectory = await taskGit(
+      workspacePath,
+      ["rev-parse", "--path-format=absolute", "--git-path", "objects"],
+    );
+    await writeFile(join(repositoryPath, "objects", "info", "alternates"), `${objectsDirectory}\n`, {
+      mode: 0o600,
+    });
+    return await operation(repositoryPath);
+  } finally {
+    await rm(repositoryPath, { recursive: true, force: true });
+  }
+}
+
 export async function inspectTaskRemoteHead(options: {
   repository: string;
   token: string;
@@ -359,11 +383,13 @@ export async function inspectTaskRemoteHead(options: {
       !/^openclaw\/agent-crew-issue-[1-9][0-9]*$/.test(options.branch)) {
     throw new Error("Remote task branch inspection is invalid.");
   }
-  const output = await authenticatedTaskGit({
-    ...options,
-    timeoutMs: 120_000,
-    args: ["ls-remote", "--refs", "origin", `refs/heads/${options.branch}`],
-  });
+  const output = await withIsolatedPublicationGit(options.workspacePath, (repositoryPath) =>
+    authenticatedTaskGit({
+      ...options,
+      workspacePath: repositoryPath,
+      timeoutMs: 120_000,
+      args: ["ls-remote", "--refs", sourceUrl(options.repository), `refs/heads/${options.branch}`],
+    }));
   if (!output) return undefined;
   const rows = output.split("\n");
   if (rows.length !== 1) throw new Error("Remote task branch lookup returned ambiguous results.");
@@ -397,14 +423,16 @@ export async function pushTaskBranch(options: {
   }
   try {
     const ref = `refs/heads/${options.branch}`;
-    await authenticatedTaskGit({
-      ...options,
-      timeoutMs: 120_000,
-      args: [
-        "push", "--porcelain", `--force-with-lease=${ref}:`,
-        sourceUrl(options.repository), `${options.expectedHead}:${ref}`,
-      ],
-    });
+    await withIsolatedPublicationGit(options.workspacePath, (repositoryPath) =>
+      authenticatedTaskGit({
+        ...options,
+        workspacePath: repositoryPath,
+        timeoutMs: 120_000,
+        args: [
+          "push", "--porcelain", `--force-with-lease=${ref}:`,
+          sourceUrl(options.repository), `${options.expectedHead}:${ref}`,
+        ],
+      }));
   } catch (error) {
     let remoteHead: string | undefined;
     try {
