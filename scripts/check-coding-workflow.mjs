@@ -18,10 +18,17 @@ try {
   await writeFile(workflow,
     (await readFile("infra/local-dev/openclaw/workflows/coding-issue.lobster", "utf8"))
       .replace("/app/extensions/agent-crew/workflows/coding-result.mjs", join(root, "workflows/coding-result.mjs")));
+  const publicationWorkflow = join(root, "publication-issue.lobster");
+  await writeFile(join(root, "workflows/publication-call.mjs"),
+    await readFile("scripts/publication-call.mjs"));
+  await writeFile(publicationWorkflow,
+    (await readFile("infra/local-dev/openclaw/workflows/publication-issue.lobster", "utf8"))
+      .replace("/app/extensions/agent-crew/scripts/publication-call.mjs", join(root, "workflows/publication-call.mjs")));
   const marker = join(root, "injected");
   const captured = join(root, "argv.json");
+  const publicationCaptured = join(root, "publication-argv.json");
   const args = {
-    agentId: "coding", sessionKey: "agent:coding:fixture",
+    agentId: "coding", sessionKey: `agent:coding:agent-crew-${"a".repeat(32)}`,
     workspacePath: "/workspaces/fixture with spaces", workspaceBranch: "openclaw/agent-crew-issue-1",
     prompt: `Issue text with "quotes", newlines\n$(touch ${marker}); \`touch ${marker}\` | json`,
     timeoutSeconds: "1200",
@@ -31,7 +38,13 @@ try {
   const usage = { total: 123, input: 100, output: 23 };
   const report = JSON.stringify({ summary: "fixture complete", validation });
   await writeFile(executable, `#!${process.execPath}\nconst fs=require('node:fs');
-fs.writeFileSync(${JSON.stringify(captured)},JSON.stringify(process.argv.slice(2)));
+const argv=process.argv.slice(2);
+if(argv[0]==='gateway'){
+  fs.writeFileSync(${JSON.stringify(publicationCaptured)},JSON.stringify(argv));
+  console.log(JSON.stringify({status:'confirmed',push:{operationId:'fixture-operation'}}));
+  process.exit(0);
+}
+fs.writeFileSync(${JSON.stringify(captured)},JSON.stringify(argv));
 console.log(JSON.stringify({runId:'fixture-run',status:'ok',result:{meta:{agentMeta:{usage:${JSON.stringify(usage)}}},payloads:[{text:${JSON.stringify(report)}}]}}));\n`);
   await chmod(executable, 0o700);
   const lobster = "/opt/agent-crew-lobster/node_modules/@openclaw/lobster/node_modules/@clawdbot/lobster/bin/lobster.js";
@@ -51,8 +64,26 @@ console.log(JSON.stringify({runId:'fixture-run',status:'ok',result:{meta:{agentM
     "agent", "--json", "--agent", args.agentId, "--session-key", args.sessionKey,
     "--message", args.prompt, "--timeout", args.timeoutSeconds,
   ]);
+  const publication = spawnSync(process.execPath, [lobster, "run", "--mode", "tool", "--file",
+    publicationWorkflow, "--args-json", JSON.stringify({
+      sessionKey: args.sessionKey, agentId: args.agentId,
+    })], {
+    encoding: "utf8", timeout: 15_000,
+    env: { LOBSTER_OPENCLAW_BIN: executable, PATH: `${root}:${process.env.PATH ?? "/usr/bin:/bin"}`, HOME: root, TMPDIR: root },
+  });
+  assert.equal(publication.status, 0, publication.stderr || publication.stdout);
+  const publicationEnvelope = JSON.parse(publication.stdout);
+  assert.deepEqual(publicationEnvelope.output, [{ status: "confirmed", push: { operationId: "fixture-operation" } }]);
+  const publicationArgv = JSON.parse(await readFile(publicationCaptured, "utf8"));
+  assert.deepEqual(publicationArgv.slice(0, 4), [
+    "gateway", "call", "agent-crew.publication.accept", "--params",
+  ]);
+  assert.deepEqual(JSON.parse(publicationArgv[4]), {
+    sessionKey: args.sessionKey, agentId: args.agentId,
+  });
+  assert.deepEqual(publicationArgv.slice(5), ["--json"]);
   await assert.rejects(readFile(marker), { code: "ENOENT" });
-  console.log("Native Lobster coding workflow: exact CLI args, safe issue text and result handoff passed (fake CLI; no model run).");
+  console.log("Native Lobster coding/publication workflows: exact CLI args, safe issue text and result handoff passed (fake CLI; no model run).");
 } finally {
   await rm(root, { recursive: true, force: true });
 }

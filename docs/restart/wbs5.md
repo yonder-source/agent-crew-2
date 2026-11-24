@@ -26,6 +26,10 @@ Derive the job, coding session, issue, repository, worktree, branch, base SHA,
 head SHA and validation from Controller-owned state and authenticated workflow
 context. Caller-supplied identities or agent-authored summaries cannot authorize
 publication. Do not expose publication as a coding-agent tool.
+The coding workflow first returns and retains its Controller-verified delivery.
+Only then may a separate trusted Lobster publication workflow invoke the
+endpoint; a completed job retains the native coding session ID, which must match
+the Gateway session authority used for publication.
 
 Require coding run status `ok`, validation status `ok` and a `ready` coding
 delivery. Validation contains status (`ok`, `failed`, or `unknown`) and the

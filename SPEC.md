@@ -419,6 +419,12 @@ accept caller-supplied authorization, expose a coding-agent publication tool,
 create another commit or rename the native managed branch. An incompatible
 remote task branch blocks publication; never force-push. Remote `main` advancing
 alone does not invalidate the recorded task base.
+The Controller retains the delivery only after the coding workflow has returned
+and the native run is confirmed stopped. A separate trusted Lobster publication
+workflow then invokes publication. Retain the native coding session ID and
+require it to match both the current Gateway session and the publication
+invocation's session authority; a recreated session with the same key cannot
+reuse the delivery.
 
 Persist push and PR creation as separate operations with unique identities,
 pre-write intent and confirmed/failed/inspection outcomes. Unacknowledged writes

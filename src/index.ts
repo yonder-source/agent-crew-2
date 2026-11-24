@@ -562,6 +562,56 @@ export default definePluginEntry({
       }
       return patchJob(issue, (current) => ({ ...current, slackThread: { ...thread, input: sent } }));
     };
+    const stoppedCodingSession = async (
+      job: Job,
+      runId: string,
+    ): Promise<string> => {
+      const stopped: unknown = await call("sessions.describe", { key: job.sessionKey });
+      const session = isRecord(stopped) ? stopped.session : undefined;
+      if (!isRecord(session) || session.key !== job.sessionKey ||
+          session.lastRunId !== runId || session.hasActiveRun !== false ||
+          typeof session.sessionId !== "string" || !session.sessionId ||
+          (Array.isArray(session.activeRunIds) && session.activeRunIds.length > 0) ||
+          (job.codingSessionId !== undefined && job.codingSessionId !== session.sessionId)) {
+        throw new Error("Coding run stopped state or native session binding could not be confirmed.");
+      }
+      return session.sessionId;
+    };
+    const runPublicationWorkflow = async (issue: Issue, job: Job): Promise<Job> => {
+      if (!config.github || !config.coding || !job.codingSessionId ||
+          job.status !== "completed" || job.codingRunStatus !== "ok" ||
+          job.codingDelivery?.status !== "ready") return job;
+      try {
+        const response: unknown = await call("tools.invoke", {
+          name: "lobster",
+          args: {
+            action: "run",
+            pipeline: "workflows/publication-issue.lobster",
+            cwd: ".",
+            timeoutMs: 120_000,
+            argsJson: JSON.stringify({
+              sessionKey: job.sessionKey,
+              agentId: config.coding.agentId,
+            }),
+          },
+          sessionKey: "agent:main:main",
+        });
+        const details = isRecord(response) && isRecord(response.output) &&
+          isRecord(response.output.details) ? response.output.details : undefined;
+        const publication = Array.isArray(details?.output)
+          ? details.output[details.output.length - 1] as unknown
+          : undefined;
+        if (!isRecord(response) || response.ok !== true || details?.ok !== true ||
+            details.status !== "ok" || !isRecord(publication) ||
+            typeof publication.status !== "string") {
+          throw new Error("Lobster publication result was invalid.");
+        }
+        return await readJob(issue) ?? job;
+      } catch {
+        api.logger.error(`Publication workflow requires inspection for ${issue.repository}#${issue.number}.`);
+        return job;
+      }
+    };
 
     const dispatchIssue = (issue: Issue, operatorRetry = false, resume?: { expectedRunId: string; input: string; slackReply?: SlackTaskReply; onAdmitted?: () => void }): Promise<Job> => {
       const requestedEpoch = admissionEpoch;
@@ -599,7 +649,11 @@ export default definePluginEntry({
         if (existing.activeTimeUncertain === true) throw new Error("Interrupted active time is unknown; inspect usage before retrying.");
         await assertNoActiveCodingTasks(existing.jobId);
       }
-      if (existing && LOCKED.has(existing.status) && !resume) return existing;
+      if (existing && LOCKED.has(existing.status) && !resume) {
+        return existing.status === "completed"
+          ? runPublicationWorkflow(issue, existing)
+          : existing;
+      }
       let workspace: { path: string; branch: string } | undefined;
       let baseCommit = existing?.baseCommit;
       if ((await session) === null) {
@@ -768,20 +822,15 @@ export default definePluginEntry({
           codingResult = resultValue;
           taskTokenUsage = addCodingUsage(priorUsage, normalizeCodingUsage(resultValue.usage));
           tokenBlocked = tokenBudget !== undefined && (taskTokenUsage.status === "unknown" || taskTokenUsage.total >= tokenBudget);
+          if (workflowStatus === "ok" && !tokenBlocked) {
+            codingSessionId = await stoppedCodingSession(job, resultValue.runId);
+          }
           if (resultValue.requestInput !== undefined && !tokenBlocked) {
             if (typeof resultValue.requestInput !== "string" || !resultValue.requestInput.trim() ||
                 resultValue.requestInput.length > 4_000 || workflowStatus !== "ok" || codingResult.status !== "ok") {
               throw new Error("Coding input request is invalid or the turn did not finish successfully.");
             }
-            const stopped: unknown = await call("sessions.describe", { key: job.sessionKey });
-            if (!isRecord(stopped) || !isRecord(stopped.session) || stopped.session.key !== job.sessionKey ||
-                stopped.session.lastRunId !== resultValue.runId || stopped.session.hasActiveRun !== false ||
-                typeof stopped.session.sessionId !== "string" || !stopped.session.sessionId ||
-                (Array.isArray(stopped.session.activeRunIds) && stopped.session.activeRunIds.length > 0)) {
-              throw new Error("Coding run stopped state could not be confirmed.");
-            }
             inputRequest = resultValue.requestInput.trim();
-            codingSessionId = stopped.session.sessionId;
           }
           if (workflowStatus === "ok" && inputRequest === undefined && !tokenBlocked) {
             const validation = normalizeCodingValidation(resultValue.validation);
@@ -832,7 +881,8 @@ export default definePluginEntry({
             updatedAt: new Date().toISOString(),
           };
         });
-        return completed.status === "waiting" ? await deliverInputRequest(issue, completed) : completed;
+        const retained = completed.status === "waiting" ? await deliverInputRequest(issue, completed) : completed;
+        return retained.status === "completed" ? await runPublicationWorkflow(issue, retained) : retained;
       } catch {
         const retained = await readJob(issue);
         if (retained?.status === "waiting") return retained;
@@ -1147,8 +1197,10 @@ export default definePluginEntry({
           const target = sessionAccessAuthority.target;
           const response: unknown = await call("sessions.describe", { key: target.sessionKey });
           const session = isRecord(response) ? response.session : undefined;
-          const extensions = isRecord(session) ? session.pluginExtensions : undefined;
-          if (!Array.isArray(extensions)) throw new Error("Publication task session metadata is unavailable.");
+          if (!isRecord(session) || !Array.isArray(session.pluginExtensions)) {
+            throw new Error("Publication task session metadata is unavailable.");
+          }
+          const extensions = session.pluginExtensions;
           const matches = extensions.filter((item: unknown) => isRecord(item) &&
             item.pluginId === "agent-crew" && item.namespace === NAMESPACE);
           const retained: unknown = matches.length === 1 && isRecord(matches[0]) ? matches[0].value : undefined;
@@ -1157,6 +1209,11 @@ export default definePluginEntry({
               retained.sessionKey !== issueSessionKey(retained) ||
               retained.repository !== config.github?.repository) {
             throw new Error("Publication request does not match the retained task binding.");
+          }
+          if (!retained.codingSessionId ||
+              target.sessionId !== retained.codingSessionId ||
+              session.sessionId !== retained.codingSessionId) {
+            throw new Error("Publication request does not match the retained native coding session.");
           }
           const accepted = publicationAcceptance(retained);
           const previous = latestPublicationPush(retained);

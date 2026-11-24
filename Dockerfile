@@ -51,6 +51,6 @@ COPY --from=build --chown=node:node /app/extensions/agent-crew/dist ./dist
 COPY --from=build --chown=node:node /app/extensions/agent-crew/node_modules ./node_modules
 COPY --chown=node:node package.json openclaw.plugin.json openclaw.json ./
 COPY --chown=node:node infra/local-dev/openclaw/workflows ./workflows
-COPY --chown=node:node scripts/check-gateway.mjs scripts/session-roundtrip.mjs scripts/check-setup-draft.mjs ./scripts/
+COPY --chown=node:node scripts/check-gateway.mjs scripts/session-roundtrip.mjs scripts/check-setup-draft.mjs scripts/publication-call.mjs ./scripts/
 USER node
 CMD ["openclaw", "gateway", "--allow-unconfigured"]

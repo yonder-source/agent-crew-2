@@ -46,7 +46,7 @@ export default defineConfig([
       "no-restricted-syntax": ["error", ...syntaxRestrictions],
     },
   },
-  // These native test helpers need fixed CLI invocations, never exec/shell APIs.
+  // These reviewed CLI and workflow helpers need fixed argument arrays, never exec/shell APIs.
   ...[
     ["scripts/check-lint.mjs", "spawnSync"],
     ["scripts/check-config.mjs", "spawnSync"],
@@ -56,6 +56,7 @@ export default defineConfig([
     ["scripts/check-dispatcher.mjs", "execFile"],
     ["scripts/check-repository-connection.mjs", "spawnSync"],
     ["scripts/check-coding-workflow.mjs", "spawnSync"],
+    ["scripts/publication-call.mjs", "spawnSync"],
   ].map(([file, allowed]) => ({
     files: [file],
     rules: {
