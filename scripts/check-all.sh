@@ -22,6 +22,10 @@ coding_deployment_model=$(mktemp)
 slack_deployment_model=$(mktemp)
 cleanup() {
   docker compose down --volumes
+  # Gateway state contains private directories owned by the container user.
+  docker run --rm --user 0 --entrypoint chown \
+    --mount "type=bind,src=$AGENT_CREW_OPENCLAW_STATE_DIR,dst=/cleanup" \
+    agent-crew-openclaw:2026.11.3 -R "$(id -u):$(id -g)" /cleanup
   rm -f "$deployment_model"
   rm -f "$coding_deployment_model"
   rm -f "$slack_deployment_model"
