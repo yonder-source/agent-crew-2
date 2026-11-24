@@ -24,7 +24,8 @@ const workspacePath = "/home/node/.openclaw/worktrees/fixture/issue-7";
 const branch = "openclaw/agent-crew-issue-7";
 const sessionKeyForFixture = "agent:coding:agent-crew-" + createHash("sha256").update("owner/repo#7").digest("hex").slice(0, 32);
 
-function harness(initialSession = null, appMode = false, slackDraft = {}, slackConfig, tokenBudget) {
+function harness(initialSession = null, appMode = false, slackDraft = {},
+  slackConfig = { coding: { agentId: "coding", channelId: "C123", userIds: ["U123"] } }, tokenBudget) {
   let session = initialSession;
   let connectedAt = 100_000;
   const slackMessages = [];
@@ -54,9 +55,12 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
   let pullRequestMode;
   let publicationSessionId = "native-session-7";
   let failConfigPatch = false;
+  let slackSettingsReady = true;
+  let slackSettingsChecks = 0;
   let inventory = { sessions: [] };
   const setupDraft = { githubAppId: "123", repository: "owner/repo", installationId: "17", repositoryPath,
-    codingAgentId: "coding", designerAgentId: "", codingChannelId: "", designerChannelId: "", codingUserIds: "", designerUserIds: "", tokenBudget: "", ...slackDraft };
+    codingAgentId: "coding", designerAgentId: "", codingChannelId: "C123", designerChannelId: "",
+    codingUserIds: "U123", designerUserIds: "", pollIntervalMs: "60000", tokenBudget: "", ...slackDraft };
   let draftAvailable = true;
   const calls = [];
   const methods = new Map();
@@ -75,8 +79,15 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
       return `100.${String(slackMessages.length).padStart(6, "0")}`;
     }, performance: { now: () => clock },
     TaskBaseError, createHash, randomUUID, codingPrompt, normalizeCodingValidation, isCodingDelivery, normalizeCodingUsage, isCodingUsage, addCodingUsage, parseTokenBudget, slackCredentialStatus, draftSlackSettings, pullRequestUrlMatches,
-    validateSlackSettings: async (settings) => Object.keys(settings).map(role => ({ id: `${role}-slack`, status: "passed", message: "Fixture verified" })),
-    readFile: async () => "fixture-token",
+    validateSlackSettings: async (settings) => {
+      slackSettingsChecks++;
+      return Object.keys(settings).flatMap(role => [
+        { id: `${role}-slack-channel`, status: slackSettingsReady ? "passed" : "failed", message: "Fixture verified" },
+        { id: `${role}-slack-users`, status: slackSettingsReady ? "passed" : "failed", message: "Fixture verified" },
+      ]);
+    },
+    readFile: async (path) => path.includes("slack-bot-token") ? "xoxb-fixture"
+      : path.includes("slack-app-token") ? "xapp-fixture" : "fixture-token",
     prepareTaskBase: async () => "a".repeat(40),
     verifyTaskWorkspace: async () => {},
     commitTaskDelivery: async (options) => {
@@ -295,6 +306,8 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
     session: () => session,
     retainQuestionDuringRun(value) { retainedQuestion = value; },
     setCoding(status, text = codingText) { codingStatus = status; codingText = text; },
+    setSlackSettingsReady(value) { slackSettingsReady = value; },
+    slackSettingsChecks() { return slackSettingsChecks; },
     setValidation(value) { codingValidation = value; },
     setUsage(value) { codingUsage = value; },
     failDelivery() { deliveryFailure = true; },
@@ -314,12 +327,36 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
   };
 }
 
+const missingSlackRuntime = harness(null, false, {}, null);
+assert.equal((await missingSlackRuntime.method("agent-crew.dispatch", issue)).ok, false,
+  "A legacy connection missing coding Slack must block admission without preventing plugin startup.");
+assert.equal(missingSlackRuntime.calls.some(call => call.method === "sessions.create" || call.method === "tools.invoke"), false);
+assert.equal((await missingSlackRuntime.method("agent-crew.setup.polling.resume", {})).ok, false);
+const mismatchedSlackRuntime = harness(null, false, {}, {
+  coding: { agentId: "other", channelId: "C123", userIds: ["U123"] },
+});
+assert.equal((await mismatchedSlackRuntime.method("agent-crew.dispatch", issue)).ok, false,
+  "A coding Slack role bound to another agent must block admission.");
+assert.equal(mismatchedSlackRuntime.calls.some(call => call.method === "sessions.create" || call.method === "tools.invoke"), false);
+
+const staleSlackMembership = harness();
+staleSlackMembership.setSlackSettingsReady(false);
+assert.equal((await staleSlackMembership.method("agent-crew.dispatch", issue)).ok, false,
+  "Archived channels or inactive authorized users must block a coding dispatch.");
+assert.equal(staleSlackMembership.slackSettingsChecks(), 1,
+  "Runtime admission must recheck current Slack channel and user state.");
+assert.equal(staleSlackMembership.calls.some(call => call.method === "sessions.create" || call.method === "tools.invoke"), false);
+assert.equal((await staleSlackMembership.method("agent-crew.setup.polling.resume", {})).ok, false,
+  "Polling must not resume when Slack membership or authorized user checks fail.");
+assert.equal(staleSlackMembership.slackSettingsChecks(), 2,
+  "Polling resume must perform a fresh Slack channel and user check.");
+
 const success = harness();
 assert.equal(success.methodScope("agent-crew.setup.slack.credentials"), "operator.admin");
 assert.deepEqual((await success.method("agent-crew.setup.slack.credentials", {})).value,
-  { botToken: "invalid", appToken: "invalid" });
+  { botToken: "available", appToken: "available" });
 const first = await success.method("agent-crew.dispatch", issue);
-assert.equal(first.ok, true);
+assert.equal(first.ok, true, JSON.stringify(first.error));
 assert.equal(first.value.job.status, "completed");
 assert.equal(first.value.job.codingRunStatus, "ok");
 assert.equal(first.value.job.workspacePath, workspacePath);
@@ -664,29 +701,40 @@ assert.equal(recovered.calls.filter(call => call.method === "sessions.create").l
 const setup = harness();
 const cloneParams = { appId: "123", installationId: 17, repository: "owner/repo", repositoryPath };
 assert.equal((await setup.method("agent-crew.setup.repository.clone", cloneParams)).ok, true);
-const applied = harness();
+const applied = harness(null, false, { pollIntervalMs: "30000" });
 const validated = await applied.method("agent-crew.setup.validate", {});
 assert.equal((await applied.method("agent-crew.setup.apply", { draftHash: validated.value.draftHash })).ok, true);
 const configWrite = applied.calls.find(call => call.method === "config.set");
 assert.equal(configWrite.params.baseHash, "fixture-revision");
 const patchedConnection = JSON.parse(configWrite.params.raw).plugins.entries["agent-crew"].config;
 assert.equal(patchedConnection.github.installationId, 17);
+assert.equal(patchedConnection.github.pollIntervalMs, 30_000);
 assert.equal(patchedConnection.coding.repositoryPath, repositoryPath);
+assert.deepEqual(patchedConnection.slack.coding, {
+  agentId: "coding", channelId: "C123", userIds: ["U123"],
+});
 const replacement = JSON.parse(configWrite.params.raw);
 assert.equal(replacement.agents.entries.coding.model, "fixture-model");
 assert.equal(replacement.gateway.auth.token, "__OPENCLAW_REDACTED__");
 assert.deepEqual(replacement.plugins.allow, ["agent-crew", "fixture-plugin"]);
 assert.equal(replacement.plugins.entries["fixture-plugin"].enabled, true);
-const slackApply = harness(null, true, { codingChannelId: "C123", codingUserIds: "U123" });
+const slackApply = harness(null, true, { codingChannelId: "C123", codingUserIds: "U123" }, null);
 const slackValidated = await slackApply.method("agent-crew.setup.validate", {});
 assert.equal(slackValidated.value.valid, true);
 assert.equal((await slackApply.method("agent-crew.setup.apply", { draftHash: slackValidated.value.draftHash })).ok, true);
 assert.deepEqual(JSON.parse(slackApply.calls.find(call => call.method === "config.set").params.raw)
   .plugins.entries["agent-crew"].config.slack, { coding: { agentId: "coding", channelId: "C123", userIds: ["U123"] } });
-const malformedSlack = harness(null, true, { codingChannelId: "C123" });
+const malformedSlack = harness(null, true, { codingChannelId: "C123", codingUserIds: "" });
 assert.equal((await malformedSlack.method("agent-crew.setup.validate", {})).value.valid, false);
 assert.equal((await malformedSlack.method("agent-crew.setup.apply", {})).ok, false);
 assert.equal(malformedSlack.calls.some(call => call.method === "config.set"), false);
+const missingCodingSlack = harness(null, true, { codingChannelId: "", codingUserIds: "" });
+assert.equal((await missingCodingSlack.method("agent-crew.setup.validate", {})).value.valid, false);
+assert.equal(missingCodingSlack.calls.some(call => call.method === "config.set"), false);
+const invalidPollInterval = harness(null, true, { pollIntervalMs: "9999" });
+assert.equal((await invalidPollInterval.method("agent-crew.setup.validate", {})).value.valid, false);
+assert.equal((await invalidPollInterval.method("agent-crew.setup.apply", {})).ok, false);
+assert.equal(invalidPollInterval.calls.some(call => call.method === "config.set"), false);
 const activeApply = harness();
 activeApply.setInventory({ sessions: [{ key: "agent:coding:agent-crew-" + "a".repeat(32), hasActiveRun: true }] });
 assert.equal((await activeApply.method("agent-crew.setup.apply", {})).ok, false);

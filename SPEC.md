@@ -135,6 +135,15 @@ interactions through the pinned plugin before relying on them.
 The setup draft validates each configured Slack role before Apply: require a
 configured agent, channel ID and nonempty authorized user ID list, verify that
 the bot belongs to an active channel, and verify active human user accounts.
+When GitHub issue discovery is configured, require a coding Slack role whose
+agent ID matches the configured coding agent; require readable bot/app secret
+files and a running, connected native Slack transport before Apply or polling.
+At every runtime polling resume and coding dispatch, recheck the bot's current
+membership in the configured coding channel, that the channel is not archived,
+and that each authorized user remains an active human account. A failed or
+unavailable check blocks polling resume and coding admission; setup-time
+validation alone is insufficient because Slack membership and account state
+can change while the Gateway is running.
 User lists accept comma or whitespace separators and are normalized on Apply.
 An empty channel and user list leaves that role unconfigured. Apply stores these
 settings in the Agent Crew configuration, preserving native Slack ingress policy

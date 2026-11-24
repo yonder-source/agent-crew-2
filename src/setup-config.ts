@@ -6,7 +6,8 @@ function record(value: unknown): value is Record<string, unknown> {
 
 export function connectionConfig(snapshot: unknown, connection: {
   repository: string; appId: string; installationId: number;
-  agentId: string; repositoryPath: string; tokenBudget?: number | undefined; slack?: SlackSettings;
+  agentId: string; repositoryPath: string; pollIntervalMs: number;
+  tokenBudget?: number | undefined; slack?: SlackSettings;
 }): { baseHash: string; raw: string } {
   if (!record(snapshot) || typeof snapshot.hash !== "string" || !record(snapshot.config) ||
       !record(snapshot.config.plugins) || !record(snapshot.config.plugins.entries)) {
@@ -23,7 +24,8 @@ export function connectionConfig(snapshot: unknown, connection: {
       "agent-crew": { ...entry, config: { ...current,
         ...(connection.slack === undefined ? {} : { slack: connection.slack }),
         github: { ...(record(current.github) ? current.github : {}), repository: connection.repository,
-          appId: connection.appId, installationId: connection.installationId },
+          appId: connection.appId, installationId: connection.installationId,
+          pollIntervalMs: connection.pollIntervalMs },
         coding: { ...(record(current.coding) ? current.coding : {}), agentId: connection.agentId,
           repositoryPath: connection.repositoryPath, tokenBudget: connection.tokenBudget },
       } },

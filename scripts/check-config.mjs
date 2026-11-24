@@ -6,27 +6,30 @@ import { join } from "node:path";
 import { parseConfig } from "../src/config.mjs";
 
 const codingExample = JSON.parse(readFileSync("infra/local-dev/openclaw/openclaw.coding.example.json", "utf8"));
+const codingSlack = { coding: { agentId: "coding", channelId: "C0123456789", userIds: ["U0123456789"] } };
 assert.deepEqual(parseConfig(codingExample.plugins.entries["agent-crew"].config), {
   environment: "local-coding",
   github: { repository: "owner/repo", pollIntervalMs: 60_000 },
+  slack: codingSlack,
   coding: { agentId: "coding", repositoryPath: "/workspaces/repositories/owner/repo" },
 });
 assert.deepEqual(parseConfig({ environment: " test " }), { environment: "test" });
 assert.throws(() => parseConfig({ environment: "test", github: { repository: "Owner/Repo" } }),
   /coding configuration is required/);
 assert.deepEqual(parseConfig({ environment: "test", github: { repository: "Owner/Repo" },
-  coding: { repositoryPath: "/workspaces/repositories/owner/repo" } }), {
-  environment: "test", github: { repository: "owner/repo", pollIntervalMs: 60_000 },
+  coding: { repositoryPath: "/workspaces/repositories/owner/repo" }, slack: codingSlack }), {
+  environment: "test", github: { repository: "owner/repo", pollIntervalMs: 60_000 }, slack: codingSlack,
   coding: { agentId: "coding", repositoryPath: "/workspaces/repositories/owner/repo" },
 });
 assert.throws(() => parseConfig({ environment: "test", github: { repository: "Owner/Repo" },
-  coding: { repositoryPath: "relative/repo" } }), /coding configuration is invalid/);
+  coding: { repositoryPath: "relative/repo" }, slack: codingSlack }), /coding configuration is invalid/);
 for (const agentId of ["worker", "coding-team"]) {
   assert.equal(parseConfig({ environment: "test", github: { repository: "owner/repo" },
-    coding: { agentId, repositoryPath: "/workspaces/repositories/owner/repo" } }).coding.agentId, agentId);
+    coding: { agentId, repositoryPath: "/workspaces/repositories/owner/repo" },
+    slack: { coding: { ...codingSlack.coding, agentId } } }).coding.agentId, agentId);
 }
 assert.throws(() => parseConfig({ environment: "test", github: { repository: "owner/repo" },
-  coding: { agentId: "../main", repositoryPath: "/workspaces/repositories/owner/repo" } }), /coding configuration is invalid/);
+  coding: { agentId: "../main", repositoryPath: "/workspaces/repositories/owner/repo" }, slack: codingSlack }), /coding configuration is invalid/);
 assert.throws(() => parseConfig({ environment: "test", github: { repository: "invalid" } }), /GitHub configuration is invalid/);
 assert.throws(() => parseConfig({}), /requires an environment name/);
 assert.throws(() => parseConfig({ environment: " " }), /non-empty environment name/);
@@ -74,7 +77,14 @@ console.log("Configuration validation checks passed.");
 
 for (const tokenBudget of [0, -1, 1.2, "100", Number.MAX_SAFE_INTEGER + 1]) {
   assert.throws(() => parseConfig({environment: "test", github: {repository: "owner/repo"},
-    coding: {repositoryPath: "/repo", tokenBudget}}), /coding configuration is invalid/);
+    coding: {repositoryPath: "/repo", tokenBudget}, slack: codingSlack}), /coding configuration is invalid/);
 }
 assert.equal(parseConfig({environment: "test", github: {repository: "owner/repo"},
-  coding: {repositoryPath: "/repo", tokenBudget: 100}}).coding.tokenBudget, 100);
+  coding: {repositoryPath: "/repo", tokenBudget: 100}, slack: codingSlack}).coding.tokenBudget, 100);
+assert.equal(parseConfig({ environment: "test", github: { repository: "owner/repo" },
+  coding: { repositoryPath: "/repo" } }).slack, undefined,
+"A legacy connection without coding Slack must still load so the operator can repair it in setup.");
+assert.equal(parseConfig({ environment: "test", github: { repository: "owner/repo" },
+  coding: { agentId: "coding", repositoryPath: "/repo" },
+  slack: { coding: { ...codingSlack.coding, agentId: "other" } } }).slack.coding.agentId, "other",
+"A mismatched Slack agent must load so the operator can repair it in setup.");

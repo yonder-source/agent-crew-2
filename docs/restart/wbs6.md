@@ -17,13 +17,23 @@ the MVP workflow.
 
 ## 6.1 Configure the workflow
 
-**Work:** Use the WBS4.5 repository connection UI and provide the remaining
-Slack channel, agent, polling interval and credential references needed by the
-existing slices.
-Use the selected OpenClaw configuration facilities where suitable.
+**Work:** Extend the WBS4.5 repository connection UI with the coding Slack
+channel, authorized user IDs and GitHub discovery polling interval. The coding
+Slack agent must match the configured coding agent. Use the existing mounted
+Slack bot/app credentials and native Socket Mode connection; report file
+readiness separately from channel/user validation and transport connection.
+Persist these settings through the existing configuration store and retain the
+current active/uncertain task guards and runtime activation boundary.
 
-**Done when:** An operator can configure one repository and Slack channel and
-start the workflow. Invalid or missing required settings produce a clear error.
+**Done when:** An operator can configure one repository, a valid coding Slack
+channel and authorized users, and a polling interval, then save, validate and
+apply. Missing or invalid settings, unavailable credentials, or disconnected
+Slack transport prevent Apply or scheduling with a clear status. Changed
+settings survive Gateway restart; scheduling resumes only after health and
+connection checks pass, including fresh Slack channel membership, archive
+status and authorized-user activity checks. A failed or unavailable Slack
+check blocks both polling resume and coding dispatch. Verify the existing job
+admission and uncertain-work guards still apply when changing settings.
 See [configuration errors](../../SPEC.md).
 
 ## 6.2 Connect Slack reporting

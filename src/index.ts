@@ -36,33 +36,44 @@ type WorkflowStatus = typeof WORKFLOW_STATUSES[number];
 const LOCKED = new Set(["starting", "active", "waiting", "completed", "needs-inspection", "abandoned"]);
 const DRAFT_FIELDS = [
   "githubAppId", "repository", "installationId", "repositoryPath", "codingAgentId", "designerAgentId",
-  "codingChannelId", "designerChannelId", "codingUserIds", "designerUserIds", "tokenBudget",
+  "codingChannelId", "designerChannelId", "codingUserIds", "designerUserIds", "pollIntervalMs", "tokenBudget",
 ] as const;
 const DRAFT_FIELD_SET = new Set<string>(DRAFT_FIELDS);
 type SetupDraft = Omit<Record<typeof DRAFT_FIELDS[number], string>, "installationId"> & { installationId?: string };
 
 function parseSetupDraft(value: unknown): SetupDraft {
   if (!isRecord(value) || Object.keys(value).some((key) => !DRAFT_FIELD_SET.has(key)) ||
-      Object.keys(value).length < DRAFT_FIELDS.length - 1 || Object.keys(value).length > DRAFT_FIELDS.length) {
+      Object.keys(value).length < DRAFT_FIELDS.length - 2 || Object.keys(value).length > DRAFT_FIELDS.length) {
     throw new Error("Invalid setup draft");
   }
   const { githubAppId, repository, repositoryPath, codingAgentId, designerAgentId,
     codingChannelId, designerChannelId, codingUserIds, designerUserIds, tokenBudget } = value;
   const installationId = Object.hasOwn(value, "installationId") ? value.installationId : "";
+  const pollIntervalMs = Object.hasOwn(value, "pollIntervalMs") ? value.pollIntervalMs : "60000";
   if (typeof githubAppId !== "string" || typeof repository !== "string" || typeof installationId !== "string" ||
       typeof repositoryPath !== "string" || typeof codingAgentId !== "string" ||
       typeof designerAgentId !== "string" || typeof codingChannelId !== "string" ||
       typeof designerChannelId !== "string" || typeof codingUserIds !== "string" ||
-      typeof designerUserIds !== "string" || typeof tokenBudget !== "string" ||
-      DRAFT_FIELDS.some((field) => (field !== "installationId" && typeof value[field] !== "string") ||
+      typeof designerUserIds !== "string" || typeof pollIntervalMs !== "string" ||
+      typeof tokenBudget !== "string" ||
+      DRAFT_FIELDS.some((field) => (field !== "installationId" && field !== "pollIntervalMs" && typeof value[field] !== "string") ||
         (typeof value[field] === "string" && value[field].length > 1024))) {
     throw new Error("Invalid setup draft");
   }
   return {
     githubAppId, repository, ...(Object.hasOwn(value, "installationId") ? { installationId } : {}),
     repositoryPath, codingAgentId, designerAgentId,
-    codingChannelId, designerChannelId, codingUserIds, designerUserIds, tokenBudget,
+    codingChannelId, designerChannelId, codingUserIds, designerUserIds, pollIntervalMs, tokenBudget,
   };
+}
+
+function parsePollIntervalMs(value: string): number {
+  if (!/^[1-9][0-9]*$/.test(value)) throw new Error("Polling interval must be a positive integer.");
+  const interval = Number(value);
+  if (!Number.isSafeInteger(interval) || interval < 10_000 || interval > 3_600_000) {
+    throw new Error("Polling interval must be between 10000 and 3600000 milliseconds.");
+  }
+  return interval;
 }
 
 function isJobStatus(value: unknown): value is JobStatus {
@@ -373,6 +384,7 @@ export default definePluginEntry({
     let pendingDispatches = 0;
     let setupApplying = false;
     let pollingReady = config.github?.appId === undefined;
+    let initialConnectionCheckPending = false;
     let pollingReason = config.github ? "Connection checks pending" : "No active repository connection";
     let pollingInspectionRequired = false;
     let activationPending = false;
@@ -411,6 +423,31 @@ export default definePluginEntry({
         ? githubApp.pullRequestTokenForRepository(config.github.appId, config.github.installationId, config.github.repository)
         : readFile("/run/secrets/agent-crew-github-installation-token", "utf8"),
     });
+    const validateSlackTransport = async (): Promise<boolean> => {
+      const transport: unknown = await call("channels.status", { probe: false });
+      const accounts = isRecord(transport) && isRecord(transport.channelAccounts) &&
+        Array.isArray(transport.channelAccounts.slack) ? transport.channelAccounts.slack as unknown[] : [];
+      const defaults = accounts.filter((account) => isRecord(account) && account.accountId === "default");
+      const account = defaults[0];
+      return defaults.length === 1 && isRecord(account) &&
+        account.running === true && account.connected === true;
+    };
+    const codingSlackRuntimeReady = async (): Promise<boolean> => {
+      const settings = config.slack?.coding;
+      if (!config.coding || !settings || settings.agentId !== config.coding.agentId) return false;
+      try {
+        const readSecret = (path: string) => readFile(path, "utf8");
+        const [credentials, settingsChecks, transportReady] = await Promise.all([
+          slackCredentialStatus(readSecret),
+          validateSlackSettings({ coding: settings }, readSecret),
+          validateSlackTransport(),
+        ]);
+        return credentials.botToken === "available" && credentials.appToken === "available" &&
+          settingsChecks.length > 0 && settingsChecks.every((check) => check.status === "passed") && transportReady;
+      } catch {
+        return false;
+      }
+    };
     const describe = async (issue: Issue) => {
       const response: unknown = await call("sessions.describe", { key: issueSessionKey(issue) });
       const session = isRecord(response) ? response.session : undefined;
@@ -1041,6 +1078,10 @@ export default definePluginEntry({
       if (setupApplying || activationPending || pollingInspectionRequired || requestedEpoch !== admissionEpoch) {
         throw new Error("Issue admission is paused while repository settings are being applied.");
       }
+      if (initialConnectionCheckPending) throw new Error("Issue admission is paused while connection checks are pending.");
+      if (config.github && config.coding && !await codingSlackRuntimeReady()) {
+        throw new Error("Coding Slack settings or mounted credentials are not ready.");
+      }
       const session = describe(issue);
       const existing = await readJob(issue, session);
       const approvedRetry = operatorRetry && existing?.status === "retry-approved";
@@ -1358,6 +1399,7 @@ export default definePluginEntry({
             repository: config.github?.repository ?? "",
             repositoryPath: config.coding?.repositoryPath ?? "",
             codingAgentId: config.coding?.agentId ?? "",
+            pollIntervalMs: config.github?.pollIntervalMs.toString() ?? "60000",
             tokenBudget: config.coding?.tokenBudget?.toString() ?? "",
             codingChannelId: config.slack?.coding?.channelId ?? "",
             codingUserIds: config.slack?.coding?.userIds.join(", ") ?? "",
@@ -1392,6 +1434,12 @@ export default definePluginEntry({
     const validateSetupDraft = async (draft: SetupDraft) => {
         const checks: ConnectionCheck[] = [];
         try {
+          parsePollIntervalMs(draft.pollIntervalMs);
+          checks.push({ id: "poll-interval", status: "passed", message: "Polling interval is valid." });
+        } catch {
+          checks.push({ id: "poll-interval", status: "failed", message: "Polling interval must be between 10000 and 3600000 milliseconds." });
+        }
+        try {
           parseTokenBudget(draft.tokenBudget);
           checks.push({ id: "token-budget", status: "passed", message: draft.tokenBudget ? "Token budget is valid; checked between coding turns." : "No token limit configured." });
         } catch {
@@ -1420,9 +1468,30 @@ export default definePluginEntry({
           checks.push({ id, status: exists ? "passed" : "failed", message: exists ? `Agent ${agentId} is configured.` : "Select an available agent." });
         }
         try {
-          checks.push(...await validateSlackSettings(draftSlackSettings(draft), (path) => readFile(path, "utf8")));
+          const configuredSlack = draftSlackSettings(draft);
+          if (!configuredSlack.coding) {
+            checks.push({ id: "coding-slack", status: "failed", message: "Configure the coding Slack channel and authorized users." });
+          } else if (configuredSlack.coding.agentId !== draft.codingAgentId) {
+            checks.push({ id: "coding-slack-agent", status: "failed", message: "Coding Slack agent must match the coding agent." });
+          }
+          checks.push(...await validateSlackSettings(configuredSlack, (path) => readFile(path, "utf8")));
         } catch {
           checks.push({ id: "slack-settings", status: "failed", message: "Each Slack role requires an agent, channel ID and authorized user IDs." });
+        }
+        const credentials = await slackCredentialStatus((path) => readFile(path, "utf8"));
+        checks.push({ id: "slack-credentials", status: credentials.botToken === "available" && credentials.appToken === "available"
+          ? "passed" : "failed", message: credentials.botToken === "available" && credentials.appToken === "available"
+          ? "Slack bot and app credentials are readable with the expected token types."
+          : `Slack credentials are not ready (bot: ${credentials.botToken}; app: ${credentials.appToken}).` });
+        try {
+          const transportReady = await validateSlackTransport();
+          checks.push({ id: "slack-transport", status: transportReady ? "passed" : "failed",
+            message: transportReady
+              ? "Slack Socket Mode transport is running and connected."
+              : "Slack Socket Mode transport is not running or connected." });
+        } catch {
+          checks.push({ id: "slack-transport", status: "failed",
+            message: "Slack Socket Mode transport status is unavailable." });
         }
         checks.push({ id: "writes", status: "unverified", message: "Push, issue writes and PR creation require separate live qualification." });
         return { checks, draftHash: createHash("sha256").update(JSON.stringify(draft)).digest("hex"),
@@ -1447,14 +1516,19 @@ export default definePluginEntry({
       if (config.github.appId !== undefined) {
         await githubApp.repositoryAccess(config.github.appId, config.github.installationId, config.github.repository);
       }
+      if (!await codingSlackRuntimeReady()) {
+        throw new Error("Active coding Slack settings or mounted credentials are not ready.");
+      }
       if (setupApplying || epoch !== admissionEpoch) throw new Error("Repository settings changed during polling checks.");
       pollingReady = true;
+      initialConnectionCheckPending = false;
       pollingInspectionRequired = false;
       pollingReason = "";
       discovery?.resume();
     };
     api.registerGatewayMethod("agent-crew.setup.polling.status", ({ respond }) => {
-      respond(true, { running: Boolean(config.github) && pollingReady && !setupApplying, reason: pollingReason, activationPending });
+      respond(true, { running: Boolean(config.github) && pollingReady && !initialConnectionCheckPending && !setupApplying,
+        reason: pollingReason, activationPending });
     }, { scope: "operator.admin" });
     api.registerGatewayMethod("agent-crew.setup.polling.resume", async ({ respond }) => {
       try {
@@ -1472,7 +1546,7 @@ export default definePluginEntry({
       setupApplying = true;
       admissionEpoch += 1;
       discovery?.pause();
-      const previouslyReady = pollingReady;
+      const previouslyReady = pollingReady && !initialConnectionCheckPending;
       pollingReady = false;
       pollingReason = "Applying repository settings";
       let committing = false;
@@ -1488,13 +1562,16 @@ export default definePluginEntry({
           const snapshot: unknown = await call("config.get", {});
           const replacement = connectionConfig(snapshot, {
             repository: draft.repository, appId: draft.githubAppId, installationId: Number(draft.installationId),
-            agentId: draft.codingAgentId, repositoryPath: draft.repositoryPath, tokenBudget: parseTokenBudget(draft.tokenBudget), slack: draftSlackSettings(draft),
+            agentId: draft.codingAgentId, repositoryPath: draft.repositoryPath,
+            pollIntervalMs: parsePollIntervalMs(draft.pollIntervalMs),
+            tokenBudget: parseTokenBudget(draft.tokenBudget), slack: draftSlackSettings(draft),
           });
           const token = await githubApp.installationTokenForRepository(draft.githubAppId, Number(draft.installationId), draft.repository);
           await cloneRepository({ repository: draft.repository, repositoryPath: draft.repositoryPath, token });
           if (JSON.stringify(await readSetupDraft()) !== JSON.stringify(draft)) throw new Error("Draft changed during Apply; validate and apply again.");
           unchanged = config.github?.appId === draft.githubAppId && config.github.installationId === Number(draft.installationId) &&
             config.github.repository === draft.repository && config.coding?.agentId === draft.codingAgentId && config.coding.repositoryPath === draft.repositoryPath &&
+            config.github.pollIntervalMs === parsePollIntervalMs(draft.pollIntervalMs) &&
             config.coding?.tokenBudget === parseTokenBudget(draft.tokenBudget) &&
             JSON.stringify(config.slack ?? {}) === JSON.stringify(draftSlackSettings(draft));
           if (unchanged) return;
@@ -2002,7 +2079,7 @@ export default definePluginEntry({
       const pollWhenReady = async () => {
         if (setupApplying || pollingInspectionRequired) return;
         try {
-          if (!pollingReady) await serialize(resumePolling);
+          if (initialConnectionCheckPending || !pollingReady) await serialize(resumePolling);
           if (!setupApplying && pollingReady) await issueDiscovery.poll();
         } catch {
           pollingReady = false;
@@ -2014,6 +2091,7 @@ export default definePluginEntry({
       api.registerService({
         id: "agent-crew-github-discovery",
         start() {
+          initialConnectionCheckPending = Boolean(config.github);
           void pollWhenReady();
           pollingTimer = setInterval(() => { void pollWhenReady(); }, pollIntervalMs);
         },

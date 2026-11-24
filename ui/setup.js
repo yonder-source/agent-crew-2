@@ -9,6 +9,7 @@ const fields = [
   ["designerAgentId", "Designer agent"],
   ["designerChannelId", "Designer Slack channel ID"],
   ["designerUserIds", "Designer authorized Slack user IDs"],
+  ["pollIntervalMs", "Polling interval (milliseconds)"],
   ["tokenBudget", "Coding task token budget"],
 ];
 
@@ -51,7 +52,11 @@ function mount(container, { host, signal }) {
     input.name = name;
     input.id = `agent-crew-${name}`;
     input.maxLength = 1024;
-    if (name === "tokenBudget") {
+    if (name === "pollIntervalMs") {
+      input.inputMode = "numeric";
+      input.placeholder = "60000";
+      input.title = "Between 10000 and 3600000 milliseconds";
+    } else if (name === "tokenBudget") {
       input.inputMode = "numeric";
       input.placeholder = "Empty: no token limit";
       input.title = "Cumulative reported tokens; checked between coding turns";

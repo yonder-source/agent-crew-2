@@ -45,8 +45,9 @@ assert.ok(!JSON.stringify(missing).includes("secret-path"));
 const snapshot = { hash: "revision", config: { channels: { slack: { groupPolicy: "disabled" } },
   plugins: { entries: { "agent-crew": { config: { environment: "test" } } } } } };
 const replacement = connectionConfig(snapshot, { repository: "owner/repo", appId: "123", installationId: 1,
-  agentId: "coding", repositoryPath: "/repo", slack: settings });
+  agentId: "coding", repositoryPath: "/repo", pollIntervalMs: 30_000, slack: settings });
 const config = JSON.parse(replacement.raw);
 assert.deepEqual(config.plugins.entries["agent-crew"].config.slack, settings);
+assert.equal(config.plugins.entries["agent-crew"].config.github.pollIntervalMs, 30_000);
 assert.equal(config.channels.slack.groupPolicy, "disabled");
 console.log("Slack settings validation and persistence checks passed.");
