@@ -20,7 +20,8 @@ WBS4.5 coding-delivery acceptance does not establish publication acceptance.
 
 ## 5.1 Accept the coding result
 
-**Work:** Add a Controller publication endpoint for the trusted Lobster workflow.
+**Work:** Add a Controller publication endpoint (`agent-crew.publication.accept`)
+for the trusted Lobster workflow.
 Derive the job, coding session, issue, repository, worktree, branch, base SHA,
 head SHA and validation from Controller-owned state and authenticated workflow
 context. Caller-supplied identities or agent-authored summaries cannot authorize

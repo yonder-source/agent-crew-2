@@ -170,6 +170,12 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
     let answer;
     await methods.get(name).handler({
       params,
+      ...(name === "agent-crew.publication.accept" ? {
+        sessionAccessAuthority: {
+          target: { agentId: "coding", sessionKey: params.sessionKey, sessionId: "native-session-7" },
+          assertCurrent() {},
+        },
+      } : {}),
       respond(ok, value, error) { answer = { ok, value, error }; },
     });
     return answer;
@@ -224,6 +230,30 @@ assert.equal(first.value.job.workspaceBranch, branch);
 assert.equal(first.value.job.baseCommit, "a".repeat(40));
 assert.equal(first.value.job.codingDelivery.headCommit, "b".repeat(40));
 assert.equal(first.value.job.codingDelivery.status, "ready");
+const acceptedPublication = await success.method("agent-crew.publication.accept", {
+  sessionKey: first.value.job.sessionKey, jobId: "caller-supplied-job", headCommit: "c".repeat(40),
+});
+assert.equal(acceptedPublication.ok, true);
+assert.equal(acceptedPublication.value.status, "accepted");
+assert.deepEqual(JSON.parse(JSON.stringify(acceptedPublication.value.publication)), {
+  repository: "owner/repo",
+  issueNumber: 7,
+  jobId: first.value.job.jobId,
+  sessionKey: first.value.job.sessionKey,
+  codingRunId: "run-7",
+  workspacePath,
+  workspaceBranch: branch,
+  baseCommit: "a".repeat(40),
+  headCommit: "b".repeat(40),
+  validation: first.value.job.codingDelivery.validation,
+});
+assert.equal((await success.method("agent-crew.publication.accept", {
+  sessionKey: "agent:coding:other",
+})).ok, false);
+const unboundPublication = await harness().method("agent-crew.publication.accept", {
+  sessionKey: first.value.job.sessionKey,
+});
+assert.equal(unboundPublication.ok, false);
 assert.equal(success.calls.find(call => call.method === "verify-delivery").params.baseCommit, "a".repeat(40));
 const restarted = harness(success.session());
 assert.deepEqual((await restarted.status()).details.job.codingDelivery, first.value.job.codingDelivery);
@@ -257,6 +287,9 @@ assert.equal(failure.ok, true);
 assert.equal(failure.value.job.status, "needs-inspection");
 assert.equal(failure.value.job.codingRunStatus, "error");
 assert.equal(failure.value.job.codingSummary, "Coding failed");
+assert.equal((await failed.method("agent-crew.publication.accept", {
+  sessionKey: failure.value.job.sessionKey,
+})).ok, false);
 assert.equal((await failed.method("agent-crew.dispatch", issue)).value.job.jobId, failure.value.job.jobId);
 assert.equal(failed.calls.filter((call) => call.method === "tools.invoke").length, 1);
 for (const validation of [undefined, { status: "ok", checks: [] },
@@ -277,6 +310,10 @@ assert.equal(dirtyJob.codingRunId, "run-7");
 assert.equal(dirtyJob.codingDelivery.validation.status, "ok");
 assert.equal(dirtyJob.codingDelivery.headCommit, undefined);
 assert.equal(dirtyJob.codingDelivery.reason, "worktree-unverified");
+assert.equal((await dirty.method("agent-crew.publication.accept", {
+  sessionKey: dirtyJob.sessionKey,
+})).ok, false);
+assert.deepEqual((await dirty.status()).details.job.codingDelivery, dirtyJob.codingDelivery);
 
 const orphan = harness({
   sessionRoot: workspacePath, sessionId: "native-session-7",

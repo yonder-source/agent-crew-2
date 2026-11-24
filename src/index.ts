@@ -101,6 +101,19 @@ type Job = Issue & {
   };
 };
 
+type PublicationAcceptance = {
+  repository: string;
+  issueNumber: number;
+  jobId: string;
+  sessionKey: string;
+  codingRunId: string;
+  workspacePath: string;
+  workspaceBranch: string;
+  baseCommit: string;
+  headCommit: string;
+  validation: CodingDelivery["validation"];
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -323,6 +336,35 @@ export default definePluginEntry({
         ...(job.issueUpdate?.status === "writing" && !activeIssueUpdates.has(job.issueUpdate.operationId)
           ? { issueUpdate: { ...job.issueUpdate, status: "needs-inspection" as const } }
           : {}),
+      };
+    };
+    const publicationAcceptance = (job: Job): PublicationAcceptance => {
+      if (job.status !== "completed") {
+        throw new Error("Coding job must be completed before publication.");
+      }
+      if (job.codingRunStatus !== "ok") {
+        throw new Error("Coding run status must be ok before publication.");
+      }
+      if (!job.codingDelivery || job.codingDelivery.status !== "ready") {
+        throw new Error("Retained coding delivery is not ready for publication.");
+      }
+      if (job.codingDelivery.validation.status !== "ok") {
+        throw new Error("Retained coding validation must be ok before publication.");
+      }
+      if (!job.workspacePath || !job.workspaceBranch || !job.baseCommit || !job.codingRunId) {
+        throw new Error("Retained task binding is incomplete for publication.");
+      }
+      return {
+        repository: job.repository,
+        issueNumber: job.number,
+        jobId: job.jobId,
+        sessionKey: job.sessionKey,
+        codingRunId: job.codingRunId,
+        workspacePath: job.workspacePath,
+        workspaceBranch: job.workspaceBranch,
+        baseCommit: job.baseCommit,
+        headCommit: job.codingDelivery.headCommit,
+        validation: job.codingDelivery.validation,
       };
     };
 
@@ -1010,6 +1052,34 @@ export default definePluginEntry({
         respond(false, undefined, { code: "TASK_RESUME_BLOCKED", message: error instanceof Error ? error.message : "Task resume requires inspection." });
       }
     }, { scope: "operator.admin" });
+    api.registerGatewayMethod("agent-crew.publication.accept", async ({ respond, sessionAccessAuthority }) => {
+      try {
+        if (!sessionAccessAuthority) {
+          throw new Error("Publication acceptance requires an authenticated task session.");
+        }
+        sessionAccessAuthority.assertCurrent();
+        const target = sessionAccessAuthority.target;
+        const response: unknown = await call("sessions.describe", { key: target.sessionKey });
+        const session = isRecord(response) ? response.session : undefined;
+        const extensions = isRecord(session) ? session.pluginExtensions : undefined;
+        if (!Array.isArray(extensions)) throw new Error("Publication task session metadata is unavailable.");
+        const matches = extensions.filter((item: unknown) => isRecord(item) &&
+          item.pluginId === "agent-crew" && item.namespace === NAMESPACE);
+        const retained: unknown = matches.length === 1 && isRecord(matches[0]) ? matches[0].value : undefined;
+        sessionAccessAuthority.assertCurrent();
+        if (!isJob(retained) || retained.sessionKey !== target.sessionKey ||
+            retained.sessionKey !== issueSessionKey(retained) ||
+            retained.repository !== config.github?.repository) {
+          throw new Error("Publication request does not match the retained task binding.");
+        }
+        respond(true, { status: "accepted", publication: publicationAcceptance(retained) });
+      } catch (error) {
+        respond(false, undefined, {
+          code: "PUBLICATION_ACCEPTANCE_BLOCKED",
+          message: error instanceof Error ? error.message : "Publication acceptance requires inspection.",
+        });
+      }
+    }, { scope: "operator.write", sessionAccess: { mode: "write" } });
 
     const claimedSlackThreads = new Map<string, symbol>();
     api.on("before_dispatch", async (event, context) => {
