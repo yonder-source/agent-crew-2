@@ -31,11 +31,26 @@ See [configuration errors](../../SPEC.md).
 **Work:** Extend WBS4.5 Slack interaction with delivery retries. After an
 initial failed input-request message, retry at most three times; an uncertain
 delivery may be retried even if it produces a duplicate. Preserve waiting state
-and report failure when attempts are exhausted.
+and report failure when attempts are exhausted. Retain delivery operation
+identity, channel, thread, attempt count and delivery state with the job across
+restart. Keep delivery outcomes separate from coding and publication outcomes;
+delivery-only recovery must not rerun coding, push or PR creation.
+
+Post Controller-owned progress updates in the task's retained Slack thread at
+these observed transitions: coding starts, implementation completes and
+validation starts, validation completes, the task enters waiting for human
+input, and the task completes or requires operator inspection. Report only
+transitions that occur. Do not ask the coding agent to send arbitrary progress
+messages or add a periodic timer. Apply the same bounded delivery retry policy
+to progress updates; a retry must not repeat coding or publication work.
 
 **Done when:** A test workflow produces a Slack message identifying the issue
 and its status. Exercise delivery failure, retry limits and uncertain delivery;
 failure remains visible and does not misrepresent workflow or publication outcome.
+Fixtures cover restart retention, duplicate events, retry exhaustion and
+delivery-only recovery without coding or publication side effects. Exercise the
+normal transitions in the integrated workflow; fixtures cover waiting and
+operator-inspection transitions without requiring them in every workflow.
 See [Slack delivery failures](../../SPEC.md#error-slack).
 
 ## 6.3 Report the draft PR
@@ -45,7 +60,9 @@ assigned issue and draft PR URL.
 
 **Done when:** A successful publication produces a Slack message with the
 correct issue and PR link. An unsuccessful publication reports its status
-without claiming a PR was created.
+without claiming a PR was created. Include a PR URL only for the confirmed
+`published` result; exclude credentials and internal operation details from
+Slack messages.
 See [workflow failures](../../SPEC.md#error-workflow).
 
 ## 6.4 Exercise the MVP workflow
@@ -58,6 +75,8 @@ it through discovery, coding, Controller publication and Slack reporting.
 channel receives its link. The agent's issue access and sandbox are checked
 along the path; a human can inspect the PR. Record the actual result and the
 separate results of duplicate and failure checks from the preceding packages.
+Record live GitHub and Slack evidence separately from fixtures and synthetic
+checks, including the authorization and delivery failure boundaries.
 
 ## 6.5 Developer and operator handoff
 

@@ -119,7 +119,8 @@ calls and results; operator preview inventory alone does not establish access.
 
 WBS4.5 provides basic Slack Socket Mode setup and coding-task interaction.
 Configure separate coding and designer agents, Slack channel IDs and authorized
-Slack user IDs; designer execution remains later scope. Store Slack credentials
+Slack user IDs. Designer issue grilling follows [WBS6.5](docs/restart/wbs6.5.md).
+Store Slack credentials
 as mounted secrets and show their availability without returning secret values.
 The optional local Slack overlay mounts separate bot and app token files only
 on the Gateway. The operator setup page reports each file as available, missing,
@@ -128,7 +129,9 @@ not authenticated or connected to Slack. Status reads require operator admin.
 The Gateway image includes the matching native Slack plugin. Socket Mode reads
 its bot and app tokens through file SecretRefs and exposes connection health
 through native channel status. Keep generic DM/channel replies, slash commands
-and join introductions disabled until task-bound ingress is implemented.
+and join introductions disabled until task-bound ingress is implemented. WBS6.5
+registers the task-bound `/grill` slash command and qualifies Slack button
+interactions through the pinned plugin before relying on them.
 The setup draft validates each configured Slack role before Apply: require a
 configured agent, channel ID and nonempty authorized user ID list, verify that
 the bot belongs to an active channel, and verify active human user accounts.
@@ -221,7 +224,40 @@ remain compatible before resuming. Replies while the Gateway is offline must be
 resent after it is healthy. A waiting task blocks incompatible configuration
 changes. Failed delivery is visible and leaves the task waiting; WBS6 adds up to
 three retries after the first attempt, accepting possible duplicates when delivery
-is uncertain. Designer workflow and skill-management UI remain later scope.
+is uncertain. WBS6 posts Controller-derived progress in the retained coding
+thread when coding starts, implementation completes and validation starts,
+validation completes, the task waits for human input, and the task completes or
+requires operator inspection. These are event-based updates; WBS6 adds no
+periodic progress timer. Apply the same bounded retry policy to progress updates;
+delivery retries never rerun coding or publication. The integrated workflow
+covers normal transitions; fixtures cover waiting and operator inspection.
+
+### Designer issue grilling
+
+An authorized human can invoke `/grill <issue-number>` in the configured
+Designer Slack channel to start an independent grilling thread for that issue.
+The Controller derives Slack identity from authenticated host context and binds
+each thread to the configured repository and selected issue, separately from
+coding jobs and worktrees. `/grill search <query>` searches only the configured
+repository using GitHub issue search syntax, excludes pull requests, defaults
+to open issues, allows an explicit closed-issue qualifier, and shows up to 10
+matches ephemerally with number, title, labels and link. Search results offer a
+`Grill this issue` button; search alone does not start a conversation. Qualify
+the pinned Slack plugin's ability to send and receive interactive button events.
+
+Designer receives bound issue content and repository development guidance as
+untrusted task material. It can grill and propose a complete replacement issue
+body, but cannot alter the title, repository, labels, coding state or
+publication. The authorized human can continue discussion or approve the exact
+proposed body with `Confirm and write back`. Before writing, the Controller
+checks whether the issue body changed since the thread started; if so, it
+returns the current body for review without overwriting it. Otherwise it updates
+only the bound issue body, reads it back and verifies it before reporting
+success. Failed or uncertain writes do not claim success and follow the existing
+inspection boundary. The human separately applies `ready for agent`; each
+explicit command or selected result starts a separate thread. Issue-wide
+discovery, polling, deduplication, automatic label application and coding
+dispatch remain outside Designer intake.
 
 Apply a shared configurable per-task token budget, accumulating usage across
 coding turns, resumption, model retries and compaction to the extent reliably
