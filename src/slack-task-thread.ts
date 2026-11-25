@@ -6,6 +6,18 @@ export type SlackTaskThread = {
   threadTs?: string;
   acceptedReplyTs?: string;
   input?: { runId: string; status: "sending" | "sent" | "failed"; messageTs?: string };
+  deliveries?: SlackTaskDelivery[];
+};
+export type SlackTaskDelivery = {
+  operationId: string;
+  kind: "input" | "progress";
+  phase: string;
+  channelId: string;
+  threadTs: string;
+  text: string;
+  attempts: number;
+  status: "pending" | "sending" | "sent" | "failed";
+  messageTs?: string;
 };
 
 const timestamp = (value: unknown): value is string => typeof value === "string" && /^\d+\.\d+$/.test(value);
@@ -20,14 +32,25 @@ export function isSlackTaskThread(value: unknown): value is SlackTaskThread {
       (value.acceptedReplyTs !== undefined && !timestamp(value.acceptedReplyTs)) ||
       (value.threadTs !== undefined && !timestamp(value.threadTs)) ||
       (value.status === "ready" && !timestamp(value.threadTs))) return false;
-  if (value.input === undefined) return true;
-  return value.status === "ready" && record(value.input) && typeof value.input.runId === "string" &&
+  if (value.input !== undefined && !(value.status === "ready" && record(value.input) && typeof value.input.runId === "string" &&
     value.input.runId.length > 0 && ["sending", "sent", "failed"].includes(String(value.input.status)) &&
     (value.input.messageTs === undefined || timestamp(value.input.messageTs)) &&
-    (value.input.status !== "sent" || timestamp(value.input.messageTs));
+    (value.input.status !== "sent" || timestamp(value.input.messageTs)))) return false;
+  if (value.deliveries === undefined) return true;
+  return value.status === "ready" && Array.isArray(value.deliveries) && value.deliveries.length <= 64 &&
+    value.deliveries.every((delivery: unknown) => record(delivery) &&
+      typeof delivery.operationId === "string" && /^[0-9a-f-]{36}$/.test(delivery.operationId) &&
+      ["input", "progress"].includes(String(delivery.kind)) && typeof delivery.phase === "string" &&
+      delivery.phase.length > 0 && delivery.phase.length <= 256 && delivery.channelId === value.channelId &&
+      delivery.threadTs === value.threadTs && typeof delivery.text === "string" && delivery.text.length > 0 &&
+      delivery.text.length <= 8_000 && typeof delivery.attempts === "number" && Number.isSafeInteger(delivery.attempts) &&
+      delivery.attempts >= 0 && delivery.attempts <= 4 &&
+      ["pending", "sending", "sent", "failed"].includes(String(delivery.status)) &&
+      (delivery.messageTs === undefined || timestamp(delivery.messageTs)) &&
+      (delivery.status !== "sent" || delivery.attempts > 0 && timestamp(delivery.messageTs)));
 }
 
-// One fixed write endpoint, one attempt. A lost acknowledgement is not retried.
+// One fixed write endpoint and one attempt; callers persist and bound retries.
 export async function postTaskSlackMessage(channelId: string, text: string, threadTs: string | undefined,
   readSecret: (path: string) => Promise<string>, request: typeof fetch = fetch): Promise<string> {
   try {

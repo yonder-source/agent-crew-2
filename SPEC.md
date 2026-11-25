@@ -119,7 +119,8 @@ calls and results; operator preview inventory alone does not establish access.
 
 WBS4.5 provides basic Slack Socket Mode setup and coding-task interaction.
 Configure separate coding and designer agents, Slack channel IDs and authorized
-Slack user IDs; designer execution remains later scope. Store Slack credentials
+Slack user IDs. Designer issue grilling follows [WBS6.5](docs/restart/wbs6.5.md).
+Store Slack credentials
 as mounted secrets and show their availability without returning secret values.
 The optional local Slack overlay mounts separate bot and app token files only
 on the Gateway. The operator setup page reports each file as available, missing,
@@ -128,10 +129,23 @@ not authenticated or connected to Slack. Status reads require operator admin.
 The Gateway image includes the matching native Slack plugin. Socket Mode reads
 its bot and app tokens through file SecretRefs and exposes connection health
 through native channel status. Keep generic DM/channel replies, slash commands
-and join introductions disabled until task-bound ingress is implemented.
+and join introductions disabled until task-bound ingress is implemented. WBS6.5
+registers the task-bound `/grill` slash command and qualifies Slack button
+interactions through the pinned plugin before relying on them.
 The setup draft validates each configured Slack role before Apply: require a
 configured agent, channel ID and nonempty authorized user ID list, verify that
-the bot belongs to an active channel, and verify active human user accounts.
+the bot belongs to an active channel, and verify authorized users are active
+human accounts, excluding deleted users, bots and Slack app users.
+When GitHub issue discovery is configured, require a coding Slack role whose
+agent ID matches the configured coding agent; require readable bot/app secret
+files and a running, connected native Slack transport before Apply or polling.
+At every runtime polling resume and coding dispatch, recheck the bot's current
+membership in the configured coding channel, that the channel is not archived,
+and that each authorized user remains an active human account, not a Slack app
+user. A failed or
+unavailable check blocks polling resume and coding admission; setup-time
+validation alone is insufficient because Slack membership and account state
+can change while the Gateway is running.
 User lists accept comma or whitespace separators and are normalized on Apply.
 An empty channel and user list leaves that role unconfigured. Apply stores these
 settings in the Agent Crew configuration, preserving native Slack ingress policy
@@ -165,10 +179,14 @@ the Controller creates and retains one task root message before coding starts,
 including its channel, agent and authorized user IDs. Resume reuses that thread
 and rejects changed Slack settings. A confirmed waiting question is sent as a
 plain-text reply in the retained thread; its run ID and delivery state are
-persisted. Root creation and input-request sends record an intent before the
-write. Failed or unacknowledged root creation blocks coding for inspection;
-failed input delivery leaves the task waiting. Lost metadata acknowledgements
-retain the sending marker and never trigger automatic replay. A native `before_dispatch` claim handler routes authenticated Slack thread
+persisted. Each input or progress delivery retains its operation ID, target
+channel/thread, message, attempt count and state before each write. Allow one
+initial attempt and at most three retries; exhausted input delivery remains
+visible while the task stays waiting. Uncertain delivery can be retried by an
+operator through the delivery-only recovery method within the same attempt
+limit, and may produce a duplicate. Recovery never reruns coding or publication.
+Failed or unacknowledged root creation blocks coding for inspection. A native
+`before_dispatch` claim handler routes authenticated Slack thread
 replies through the Controller resume seam. It derives user, account, channel,
 thread and message identity from host context, matches exactly one retained task,
 and rechecks authorization when dispatch is serialized. Only a successfully sent
@@ -180,7 +198,10 @@ when coding Slack settings are present. Replies predating the current native
 Slack connection must be resent. This ingress path passed a real authorized-human Slack reply and same-task
 resumption qualification, including validated committed delivery and replay
 protection. Native admission is enabled only for the configured coding channel
-and authorized user allowlist. Provider
+and authorized user allowlist. Controller progress updates report only
+observable milestones; the current combined coding turn does not expose a
+separate implementation-complete or validation-start event.
+
 The Controller accumulates reported per-turn totals in taskTokenUsage and
 checks an optional coding.tokenBudget between turns. The setup draft accepts
 a positive integer or an empty value to leave the limit unconfigured. Snapshot
@@ -221,7 +242,44 @@ remain compatible before resuming. Replies while the Gateway is offline must be
 resent after it is healthy. A waiting task blocks incompatible configuration
 changes. Failed delivery is visible and leaves the task waiting; WBS6 adds up to
 three retries after the first attempt, accepting possible duplicates when delivery
-is uncertain. Designer workflow and skill-management UI remain later scope.
+is uncertain. WBS6 posts Controller-derived progress in the retained coding
+thread when coding starts, implementation completes and validation starts,
+validation completes, the task waits for human input, and the task completes or
+requires operator inspection. These are event-based updates; WBS6 adds no
+periodic progress timer. Apply the same bounded retry policy to progress updates;
+delivery retries never rerun coding or publication. The completion report names
+the assigned issue and publication status; it includes a draft PR URL only when
+the retained publication result is confirmed as `published`. A failed or
+uncertain publication report must not imply that a PR exists. Polling resume
+shares Apply's guard against an in-progress setup or pending task dispatch. The integrated workflow
+covers normal transitions; fixtures cover waiting and operator inspection.
+
+### Designer issue grilling
+
+An authorized human can invoke `/grill <issue-number>` in the configured
+Designer Slack channel to start an independent grilling thread for that issue.
+The Controller derives Slack identity from authenticated host context and binds
+each thread to the configured repository and selected issue, separately from
+coding jobs and worktrees. `/grill search <query>` searches only the configured
+repository using GitHub issue search syntax, excludes pull requests, defaults
+to open issues, allows an explicit closed-issue qualifier, and shows up to 10
+matches ephemerally with number, title, labels and link. Search results offer a
+`Grill this issue` button; search alone does not start a conversation. Qualify
+the pinned Slack plugin's ability to send and receive interactive button events.
+
+Designer receives bound issue content and repository development guidance as
+untrusted task material. It can grill and propose a complete replacement issue
+body, but cannot alter the title, repository, labels, coding state or
+publication. The authorized human can continue discussion or approve the exact
+proposed body with `Confirm and write back`. Before writing, the Controller
+checks whether the issue body changed since the thread started; if so, it
+returns the current body for review without overwriting it. Otherwise it updates
+only the bound issue body, reads it back and verifies it before reporting
+success. Failed or uncertain writes do not claim success and follow the existing
+inspection boundary. The human separately applies `ready for agent`; each
+explicit command or selected result starts a separate thread. Issue-wide
+discovery, polling, deduplication, automatic label application and coding
+dispatch remain outside Designer intake.
 
 Apply a shared configurable per-task token budget, accumulating usage across
 coding turns, resumption, model retries and compaction to the extent reliably

@@ -191,8 +191,9 @@ The setup page's **Slack credentials** area checks readability and expected
 token type, with a button to repeat the check. Values and raw filesystem errors
 are never returned. `Available` means file readiness, not successful Slack
 authentication. The native transport setup below separately enables the
-Socket Mode connection. Applying saved channel/user routing and task interaction
-remain later work. The optional overlay requires both files to exist.
+Socket Mode connection. The WBS6 operator handoff below describes applying
+channel/user routing and using task-bound interaction. The optional overlay
+requires both files to exist.
 
 ### Native Slack Socket Mode connection
 
@@ -206,10 +207,99 @@ Merge it into the existing configuration and validate with the pinned runtime
 before applying; use the Slack Compose overlay when recreating the Gateway.
 
 The fragment disables generic DM/channel handling, slash commands and join
-introductions. The transport can connect while task-bound reply handling is
-still being implemented. Native `channels.status` reports the account's
-`running`, `connected` and probe result; file availability alone does not establish
+introductions. Native `channels.status` reports the account's `running`,
+`connected` and probe result; file availability alone does not establish
 connection. See [native connection evidence](docs/restart/evidence/wbs4.5-slack-socket-qualification.md).
+
+## WBS6 operator handoff
+
+The live MVP qualification used OpenClaw and Slack plugin `2026.11.3`, Node.js
+`v24.22.1`, coding model `gpt-6-luna`, and runtime image
+`sha256:c03278f73c3e9e78efd0977f42b0f71edcff2bfe64cdae6015da10d05cf919ed`.
+See the [recorded qualification](docs/restart/evidence/wbs6-mvp-qualification.md)
+for the disposable issue, coding result, draft PR and Slack thread.
+
+For the integrated workflow, provision the GitHub App PEM and Slack bot/app
+tokens at the host paths described above, then start the Gateway with all three
+overlays:
+
+```sh
+docker compose -f infra/local-dev/openclaw/compose.yaml \
+  -f infra/local-dev/openclaw/compose.setup.yaml \
+  -f infra/local-dev/openclaw/compose.slack.yaml up -d --build gateway
+```
+
+Open the OpenClaw Control UI and select **Agent Crew** in its navigation. Load
+repositories with the GitHub App ID, choose the repository, checkout path,
+coding/designer agents, Slack channel IDs and authorized user IDs, and polling
+interval. Save, validate the saved connection, then Apply. Check connection and
+scheduling status on the page; it also has **Resume scheduling** for a
+connection that passed its readiness checks but remains paused. Apply and resume
+recheck repository access, Slack channel membership/archive state, authorized
+user activity and transport readiness. A failed check keeps scheduling paused.
+
+When a labeled issue is discovered, inspect its issue and Slack task thread.
+Read the retained Controller job and confirmed publication result with the
+status tool from the Gateway container, replacing the repository and issue
+number:
+
+```sh
+docker compose -f infra/local-dev/openclaw/compose.yaml \
+  -f infra/local-dev/openclaw/compose.setup.yaml \
+  -f infra/local-dev/openclaw/compose.slack.yaml exec gateway \
+  openclaw gateway call tools.invoke \
+  --params '{"name":"agent_crew_status","args":{"repository":"owner/repo","issueNumber":1},"sessionKey":"agent:main:main"}' \
+  --json
+```
+
+The result reports workflow status and includes a draft PR URL only when
+publication is confirmed. Match the issue and URL against GitHub before treating
+publication as complete. Inspect the task's Slack thread for progress and final
+reporting. Slack delivery state is separate from coding/publication; after
+checking the thread and retained job, an operator may retry one specific
+delivery with `agent-crew.slack.delivery.retry` and its retained `operationId`.
+For example, replace the repository, issue and operation ID below:
+
+```sh
+docker compose -f infra/local-dev/openclaw/compose.yaml \
+  -f infra/local-dev/openclaw/compose.setup.yaml \
+  -f infra/local-dev/openclaw/compose.slack.yaml exec gateway \
+  openclaw gateway call agent-crew.slack.delivery.retry \
+  --params '{"repository":"owner/repo","issueNumber":1,"operationId":"00000000-0000-4000-8000-000000000000"}' \
+  --json
+```
+
+Retries are bounded and do not rerun coding or publication.
+
+If a task reports `needs-inspection`, inspect the GitHub issue, branch, head and
+pull requests, then inspect the Slack thread for the actual delivery. Do not
+blindly retry an uncertain push or PR creation. Record the evidence in a
+nonempty note and use operator-only `agent-crew.resolve` with the matching
+target (`workflow`, `publication-push`, `publication-pr` or `issue-update`).
+Workflow and publication targets allow `retry` or `abandon`; `issue-update`
+also allows `confirm`. For example, after checking the issue, branch and head
+and searching GitHub for an existing PR, record that evidence and approve
+recovery of the retained PR operation:
+
+```sh
+docker compose -f infra/local-dev/openclaw/compose.yaml \
+  -f infra/local-dev/openclaw/compose.setup.yaml \
+  -f infra/local-dev/openclaw/compose.slack.yaml exec gateway \
+  openclaw gateway call agent-crew.resolve \
+  --params '{"repository":"owner/repo","issueNumber":1,"target":"publication-pr","decision":"retry","note":"Checked GitHub issue, branch and head; no matching PR exists."}' \
+  --json
+```
+
+A retry approves recovery of the retained operation; it does not prove that the
+external action succeeded. Read status again and confirm the result in
+GitHub/Slack. The [WBS6 qualification](docs/restart/evidence/wbs6-mvp-qualification.md)
+records a real case where a later check confirmed the existing PR without
+creating a duplicate.
+
+The next deployment slice still needs cloud VM startup/network qualification
+and production secret delivery/rotation. Slack readiness approval and automated
+recovery policy remain open; the local disposable qualification does not
+establish them.
 
 ## Local coding workflow
 

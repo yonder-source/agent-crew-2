@@ -21,7 +21,7 @@ const request = async (url, options) => {
   assert.equal(options.headers.Authorization, "Bearer xoxb-fixture");
   assert.equal(options.redirect, "error");
   const id = endpoint.searchParams.get("user");
-  return { ok: true, json: async () => id ? { ok: true, user: { id, deleted: false, is_bot: false } }
+  return { ok: true, json: async () => id ? { ok: true, user: { id, deleted: false, is_bot: false, is_app_user: false } }
     : { ok: true, channel: { id: endpoint.searchParams.get("channel"), is_member: true, is_archived: false } } };
 };
 const checks = await validateSlackSettings(settings, async () => "xoxb-fixture", request);
@@ -32,6 +32,8 @@ for (const response of [
   { ok: true, channel: { id: "C123", is_member: false, is_archived: false } },
   { ok: true, channel: { id: "C123", is_member: true, is_archived: true } },
   { ok: true, user: { id: "U1", deleted: true, is_bot: false } },
+  { ok: true, user: { id: "U1", deleted: false, is_bot: false, is_app_user: true } },
+  { ok: true, user: { id: "U1", deleted: false, is_bot: false } },
   { ok: false, error: "xoxb-secret-provider-error" },
 ]) {
   const result = await validateSlackSettings(settings, async () => "xoxb-fixture",
@@ -45,8 +47,9 @@ assert.ok(!JSON.stringify(missing).includes("secret-path"));
 const snapshot = { hash: "revision", config: { channels: { slack: { groupPolicy: "disabled" } },
   plugins: { entries: { "agent-crew": { config: { environment: "test" } } } } } };
 const replacement = connectionConfig(snapshot, { repository: "owner/repo", appId: "123", installationId: 1,
-  agentId: "coding", repositoryPath: "/repo", slack: settings });
+  agentId: "coding", repositoryPath: "/repo", pollIntervalMs: 30_000, slack: settings });
 const config = JSON.parse(replacement.raw);
 assert.deepEqual(config.plugins.entries["agent-crew"].config.slack, settings);
+assert.equal(config.plugins.entries["agent-crew"].config.github.pollIntervalMs, 30_000);
 assert.equal(config.channels.slack.groupPolicy, "disabled");
 console.log("Slack settings validation and persistence checks passed.");

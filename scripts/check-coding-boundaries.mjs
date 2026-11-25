@@ -24,11 +24,13 @@ const workspacePath = "/home/node/.openclaw/worktrees/fixture/issue-7";
 const branch = "openclaw/agent-crew-issue-7";
 const sessionKeyForFixture = "agent:coding:agent-crew-" + createHash("sha256").update("owner/repo#7").digest("hex").slice(0, 32);
 
-function harness(initialSession = null, appMode = false, slackDraft = {}, slackConfig, tokenBudget) {
+function harness(initialSession = null, appMode = false, slackDraft = {},
+  slackConfig = { coding: { agentId: "coding", channelId: "C123", userIds: ["U123"] } }, tokenBudget) {
   let session = initialSession;
   let connectedAt = 100_000;
   const slackMessages = [];
   let failSlackAt;
+  const failSlackAttempts = new Set();
   let failSlackPersistence;
   let failAcceptedReplyPatch = false;
   const extraSessions = new Map();
@@ -54,9 +56,12 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
   let pullRequestMode;
   let publicationSessionId = "native-session-7";
   let failConfigPatch = false;
+  let slackSettingsReady = true;
+  let slackSettingsChecks = 0;
   let inventory = { sessions: [] };
   const setupDraft = { githubAppId: "123", repository: "owner/repo", installationId: "17", repositoryPath,
-    codingAgentId: "coding", designerAgentId: "", codingChannelId: "", designerChannelId: "", codingUserIds: "", designerUserIds: "", tokenBudget: "", ...slackDraft };
+    codingAgentId: "coding", designerAgentId: "", codingChannelId: "C123", designerChannelId: "",
+    codingUserIds: "U123", designerUserIds: "", pollIntervalMs: "60000", tokenBudget: "", ...slackDraft };
   let draftAvailable = true;
   const calls = [];
   const methods = new Map();
@@ -67,16 +72,27 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
       const retained = session.pluginExtensions[0].value;
       assert.equal(retained.slackThread.status, threadTs ? "ready" : "creating");
       if (threadTs) {
-        assert.equal(retained.status, "waiting");
-        assert.equal(retained.slackThread.input.status, "sending");
+        const operation = retained.slackThread.deliveries.find(delivery => delivery.text === text);
+        assert.equal(operation.status, "sending", "The operation attempt must be retained before the Slack write.");
+        if (operation.kind === "input") {
+          assert.equal(retained.status, "waiting");
+          assert.equal(retained.slackThread.input.status, "sending");
+        }
       }
       slackMessages.push({ channelId, text, threadTs });
-      if (slackMessages.length === failSlackAt) throw new Error("secret-provider-error");
+      if (slackMessages.length === failSlackAt || failSlackAttempts.has(slackMessages.length)) throw new Error("secret-provider-error");
       return `100.${String(slackMessages.length).padStart(6, "0")}`;
     }, performance: { now: () => clock },
     TaskBaseError, createHash, randomUUID, codingPrompt, normalizeCodingValidation, isCodingDelivery, normalizeCodingUsage, isCodingUsage, addCodingUsage, parseTokenBudget, slackCredentialStatus, draftSlackSettings, pullRequestUrlMatches,
-    validateSlackSettings: async (settings) => Object.keys(settings).map(role => ({ id: `${role}-slack`, status: "passed", message: "Fixture verified" })),
-    readFile: async () => "fixture-token",
+    validateSlackSettings: async (settings) => {
+      slackSettingsChecks++;
+      return Object.keys(settings).flatMap(role => [
+        { id: `${role}-slack-channel`, status: slackSettingsReady ? "passed" : "failed", message: "Fixture verified" },
+        { id: `${role}-slack-users`, status: slackSettingsReady ? "passed" : "failed", message: "Fixture verified" },
+      ]);
+    },
+    readFile: async (path) => path.includes("slack-bot-token") ? "xoxb-fixture"
+      : path.includes("slack-app-token") ? "xapp-fixture" : "fixture-token",
     prepareTaskBase: async () => "a".repeat(40),
     verifyTaskWorkspace: async () => {},
     commitTaskDelivery: async (options) => {
@@ -206,6 +222,7 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
         }
         if ((failSlackPersistence === "root" && thread?.status === "ready") ||
             (failSlackPersistence === "sent" && thread?.input?.status === "sent")) {
+          failSlackPersistence = undefined;
           throw new Error("Secret-bearing persistence failure");
         }
         session.pluginExtensions = [{ pluginId: "agent-crew", namespace: "agent-crew-job", value: params.value }];
@@ -280,6 +297,7 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
     reconnectAt(value) { connectedAt = value; },
     inbound(event, context) { return hooks.get("before_dispatch")(event, context); },
     failSlackMessageAt(value) { failSlackAt = value; },
+    failSlackMessagesAt(values) { for (const value of values) failSlackAttempts.add(value); },
     failAcceptedReply() { failAcceptedReplyPatch = true; },
     failSlackPersistenceAt(value) { failSlackPersistence = value; },
     methodScope(name) { return methods.get(name).options.scope; },
@@ -295,6 +313,8 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
     session: () => session,
     retainQuestionDuringRun(value) { retainedQuestion = value; },
     setCoding(status, text = codingText) { codingStatus = status; codingText = text; },
+    setSlackSettingsReady(value) { slackSettingsReady = value; },
+    slackSettingsChecks() { return slackSettingsChecks; },
     setValidation(value) { codingValidation = value; },
     setUsage(value) { codingUsage = value; },
     failDelivery() { deliveryFailure = true; },
@@ -314,12 +334,36 @@ function harness(initialSession = null, appMode = false, slackDraft = {}, slackC
   };
 }
 
+const missingSlackRuntime = harness(null, false, {}, null);
+assert.equal((await missingSlackRuntime.method("agent-crew.dispatch", issue)).ok, false,
+  "A legacy connection missing coding Slack must block admission without preventing plugin startup.");
+assert.equal(missingSlackRuntime.calls.some(call => call.method === "sessions.create" || call.method === "tools.invoke"), false);
+assert.equal((await missingSlackRuntime.method("agent-crew.setup.polling.resume", {})).ok, false);
+const mismatchedSlackRuntime = harness(null, false, {}, {
+  coding: { agentId: "other", channelId: "C123", userIds: ["U123"] },
+});
+assert.equal((await mismatchedSlackRuntime.method("agent-crew.dispatch", issue)).ok, false,
+  "A coding Slack role bound to another agent must block admission.");
+assert.equal(mismatchedSlackRuntime.calls.some(call => call.method === "sessions.create" || call.method === "tools.invoke"), false);
+
+const staleSlackMembership = harness();
+staleSlackMembership.setSlackSettingsReady(false);
+assert.equal((await staleSlackMembership.method("agent-crew.dispatch", issue)).ok, false,
+  "Archived channels or inactive authorized users must block a coding dispatch.");
+assert.equal(staleSlackMembership.slackSettingsChecks(), 1,
+  "Runtime admission must recheck current Slack channel and user state.");
+assert.equal(staleSlackMembership.calls.some(call => call.method === "sessions.create" || call.method === "tools.invoke"), false);
+assert.equal((await staleSlackMembership.method("agent-crew.setup.polling.resume", {})).ok, false,
+  "Polling must not resume when Slack membership or authorized user checks fail.");
+assert.equal(staleSlackMembership.slackSettingsChecks(), 2,
+  "Polling resume must perform a fresh Slack channel and user check.");
+
 const success = harness();
 assert.equal(success.methodScope("agent-crew.setup.slack.credentials"), "operator.admin");
 assert.deepEqual((await success.method("agent-crew.setup.slack.credentials", {})).value,
-  { botToken: "invalid", appToken: "invalid" });
+  { botToken: "available", appToken: "available" });
 const first = await success.method("agent-crew.dispatch", issue);
-assert.equal(first.ok, true);
+assert.equal(first.ok, true, JSON.stringify(first.error));
 assert.equal(first.value.job.status, "completed");
 assert.equal(first.value.job.codingRunStatus, "ok");
 assert.equal(first.value.job.workspacePath, workspacePath);
@@ -332,6 +376,9 @@ assert.equal(success.session().pluginExtensions[0].value.codingSessionId, "nativ
   "Completed coding deliveries must retain their native session identity");
 assert.equal(first.value.job.codingDelivery.headCommit, "b".repeat(40));
 assert.equal(first.value.job.codingDelivery.status, "ready");
+const publishedSlackReports = success.slackMessages.filter(message =>
+  message.text.includes("owner/repo#7") && message.text.includes("https://github.com/owner/repo/pull/78"));
+assert.equal(publishedSlackReports.length, 1, "Slack must report the assigned issue and only the confirmed draft PR URL.");
 const acceptedPublication = await success.method("agent-crew.publication.accept", {
   sessionKey: first.value.job.sessionKey, jobId: "caller-supplied-job", headCommit: "c".repeat(40),
 });
@@ -451,6 +498,15 @@ assert.equal((await failed.method("agent-crew.publication.accept", {
 })).ok, false);
 assert.equal((await failed.method("agent-crew.dispatch", issue)).value.job.jobId, failure.value.job.jobId);
 assert.equal(failed.calls.filter((call) => call.method === "tools.invoke").length, 1);
+const failedPublicationReporting = harness();
+failedPublicationReporting.failTaskPush("PUSH_REJECTED");
+const failedPublicationResult = await failedPublicationReporting.method("agent-crew.dispatch", issue);
+assert.equal(failedPublicationResult.value.job.status, "completed");
+const failedPublicationMessage = failedPublicationReporting.slackMessages.find(message =>
+  message.text.includes("owner/repo#7") && message.text.includes("publication status: failed"));
+assert.ok(failedPublicationMessage, "Slack must report a failed publication against the assigned issue.");
+assert.equal(failedPublicationMessage.text.includes("pull/"), false,
+  "An unsuccessful publication must not claim a PR URL.");
 for (const validation of [undefined, { status: "ok", checks: [] },
   { status: "failed", checks: [{ command: "npm test", outcome: "failed", exitCode: 1 }] }]) {
   const invalid = harness();
@@ -664,29 +720,40 @@ assert.equal(recovered.calls.filter(call => call.method === "sessions.create").l
 const setup = harness();
 const cloneParams = { appId: "123", installationId: 17, repository: "owner/repo", repositoryPath };
 assert.equal((await setup.method("agent-crew.setup.repository.clone", cloneParams)).ok, true);
-const applied = harness();
+const applied = harness(null, false, { pollIntervalMs: "30000" });
 const validated = await applied.method("agent-crew.setup.validate", {});
 assert.equal((await applied.method("agent-crew.setup.apply", { draftHash: validated.value.draftHash })).ok, true);
 const configWrite = applied.calls.find(call => call.method === "config.set");
 assert.equal(configWrite.params.baseHash, "fixture-revision");
 const patchedConnection = JSON.parse(configWrite.params.raw).plugins.entries["agent-crew"].config;
 assert.equal(patchedConnection.github.installationId, 17);
+assert.equal(patchedConnection.github.pollIntervalMs, 30_000);
 assert.equal(patchedConnection.coding.repositoryPath, repositoryPath);
+assert.deepEqual(patchedConnection.slack.coding, {
+  agentId: "coding", channelId: "C123", userIds: ["U123"],
+});
 const replacement = JSON.parse(configWrite.params.raw);
 assert.equal(replacement.agents.entries.coding.model, "fixture-model");
 assert.equal(replacement.gateway.auth.token, "__OPENCLAW_REDACTED__");
 assert.deepEqual(replacement.plugins.allow, ["agent-crew", "fixture-plugin"]);
 assert.equal(replacement.plugins.entries["fixture-plugin"].enabled, true);
-const slackApply = harness(null, true, { codingChannelId: "C123", codingUserIds: "U123" });
+const slackApply = harness(null, true, { codingChannelId: "C123", codingUserIds: "U123" }, null);
 const slackValidated = await slackApply.method("agent-crew.setup.validate", {});
 assert.equal(slackValidated.value.valid, true);
 assert.equal((await slackApply.method("agent-crew.setup.apply", { draftHash: slackValidated.value.draftHash })).ok, true);
 assert.deepEqual(JSON.parse(slackApply.calls.find(call => call.method === "config.set").params.raw)
   .plugins.entries["agent-crew"].config.slack, { coding: { agentId: "coding", channelId: "C123", userIds: ["U123"] } });
-const malformedSlack = harness(null, true, { codingChannelId: "C123" });
+const malformedSlack = harness(null, true, { codingChannelId: "C123", codingUserIds: "" });
 assert.equal((await malformedSlack.method("agent-crew.setup.validate", {})).value.valid, false);
 assert.equal((await malformedSlack.method("agent-crew.setup.apply", {})).ok, false);
 assert.equal(malformedSlack.calls.some(call => call.method === "config.set"), false);
+const missingCodingSlack = harness(null, true, { codingChannelId: "", codingUserIds: "" });
+assert.equal((await missingCodingSlack.method("agent-crew.setup.validate", {})).value.valid, false);
+assert.equal(missingCodingSlack.calls.some(call => call.method === "config.set"), false);
+const invalidPollInterval = harness(null, true, { pollIntervalMs: "9999" });
+assert.equal((await invalidPollInterval.method("agent-crew.setup.validate", {})).value.valid, false);
+assert.equal((await invalidPollInterval.method("agent-crew.setup.apply", {})).ok, false);
+assert.equal(invalidPollInterval.calls.some(call => call.method === "config.set"), false);
 const activeApply = harness();
 activeApply.setInventory({ sessions: [{ key: "agent:coding:agent-crew-" + "a".repeat(32), hasActiveRun: true }] });
 assert.equal((await activeApply.method("agent-crew.setup.apply", {})).ok, false);
@@ -848,33 +915,84 @@ assert.equal((await multipleWaiters.method("agent-crew.resume", resumeParams)).o
   "Another stopped waiting task must not deadlock task resumption");
 
 const slackConfig = { coding: { agentId: "coding", channelId: "C123", userIds: ["U123"] } };
+const failedProgressDelivery = harness(null, false, {}, slackConfig);
+failedProgressDelivery.failSlackMessagesAt([2, 3, 4, 5]);
+const progressResult = await failedProgressDelivery.method("agent-crew.dispatch", issue);
+assert.equal(progressResult.value.job.status, "completed", "Progress delivery failure must not change workflow outcome.");
+assert.equal(progressResult.value.job.slackThread.deliveries.find(delivery => delivery.phase === "coding-started").attempts, 4);
+assert.equal(progressResult.value.job.slackThread.deliveries.find(delivery => delivery.phase === "coding-started").status, "failed");
+assert.equal(failedProgressDelivery.calls.filter(call => call.method === "tools.invoke").length, 2,
+  "A progress delivery retry must not repeat coding or publication; this fixture has one coding and one publication call.");
+const inspectionProgress = harness(null, false, {}, slackConfig);
+inspectionProgress.setValidation({ status: "failed", checks: [{ command: "npm test", outcome: "failed", exitCode: 1 }] });
+const inspectionResult = await inspectionProgress.method("agent-crew.dispatch", issue);
+assert.equal(inspectionResult.value.job.status, "needs-inspection");
+assert.equal(inspectionResult.value.job.slackThread.deliveries.find(delivery => delivery.phase === "needs-inspection").status, "sent");
 const slackWait = harness(null, false, {}, slackConfig);
 slackWait.requestInput("Should I use <@U123> or <!channel> as plain text?");
 const slackWaited = await slackWait.method("agent-crew.dispatch", issue);
 assert.equal(slackWaited.value.job.status, "waiting");
 assert.equal(slackWaited.value.job.slackThread.threadTs, "100.000001");
 assert.equal(slackWaited.value.job.slackThread.input.status, "sent");
-assert.equal(slackWaited.value.job.slackThread.input.messageTs, "100.000002");
-assert.equal(slackWait.slackMessages[1].threadTs, "100.000001");
-assert.equal(slackWait.slackMessages.length, 2);
+assert.equal(slackWaited.value.job.slackThread.input.messageTs, "100.000005");
+assert.equal(JSON.stringify(slackWaited.value.job.slackThread.deliveries.filter(delivery => delivery.kind === "progress").map(delivery => delivery.phase)),
+  JSON.stringify(["coding-started", "coding-workflow-returned", "waiting"]));
+assert.equal(slackWait.slackMessages[4].threadTs, "100.000001");
+assert.equal(slackWaited.value.job.slackThread.deliveries.find(delivery => delivery.kind === "input").attempts, 1);
+assert.equal(slackWait.slackMessages.length, 5);
 await slackWait.method("agent-crew.dispatch", issue);
-assert.equal(slackWait.slackMessages.length, 2, "Duplicate discovery must not resend Slack messages");
+assert.equal(slackWait.slackMessages.length, 5, "Duplicate discovery must not resend Slack messages");
+
+const pendingDispatchPolling = harness();
+pendingDispatchPolling.holdRun();
+const activeDispatch = pendingDispatchPolling.method("agent-crew.dispatch", issue);
+while (!pendingDispatchPolling.calls.some(call => call.method === "tools.invoke" &&
+  call.params.args.pipeline !== "workflows/publication-issue.lobster")) await new Promise(resolve => setImmediate(resolve));
+const resumedDuringDispatch = pendingDispatchPolling.method("agent-crew.setup.polling.resume", {});
+pendingDispatchPolling.releaseRun();
+await activeDispatch;
+assert.equal((await resumedDuringDispatch).ok, false,
+  "Polling resume requested during a pending dispatch must remain blocked.");
 const slackRestart = harness(structuredClone(slackWait.session()), false, {}, slackConfig);
 assert.equal((await slackRestart.status()).details.job.slackThread.input.status, "sent");
 assert.equal(slackRestart.slackMessages.length, 0);
 slackRestart.setInventory({ sessions: [{ key: slackWaited.value.job.sessionKey, hasActiveRun: false }] });
 assert.equal((await slackRestart.method("agent-crew.resume", { ...issue, expectedRunId: "run-7", input: "Proceed" })).ok, true);
-assert.equal(slackRestart.slackMessages.length, 0, "Resume must reuse the retained task thread");
+assert.equal(slackRestart.slackMessages.some(message => message.threadTs === undefined), false,
+  "Resume must reuse the retained task thread instead of creating a new root.");
+assert.equal(slackRestart.slackMessages.some(message => message.text === "Should I use <@U123> or <!channel> as plain text?"), false,
+  "Resume must not resend the already delivered input request.");
 
 const failedInputDelivery = harness(null, false, {}, slackConfig);
 failedInputDelivery.requestInput("Need a decision");
-failedInputDelivery.failSlackMessageAt(2);
+failedInputDelivery.failSlackMessageAt(5);
 const failedInput = await failedInputDelivery.method("agent-crew.dispatch", issue);
 assert.equal(failedInput.value.job.status, "waiting");
-assert.equal(failedInput.value.job.slackThread.input.status, "failed");
+assert.equal(failedInput.value.job.slackThread.input.status, "sent", "Transient input delivery failure should retry within the bound.");
+const retriedInput = failedInput.value.job.slackThread.deliveries.find(delivery => delivery.kind === "input");
+assert.equal(retriedInput.attempts, 2);
+assert.equal(retriedInput.status, "sent");
 await failedInputDelivery.method("agent-crew.dispatch", issue);
-assert.equal(failedInputDelivery.slackMessages.length, 2);
+assert.equal(failedInputDelivery.slackMessages.length, 6);
 assert.ok(!JSON.stringify(failedInput).includes("secret-provider-error"));
+const exhaustedInputDelivery = harness(null, false, {}, slackConfig);
+exhaustedInputDelivery.requestInput("Need a decision");
+exhaustedInputDelivery.failSlackMessagesAt([5, 6, 7, 8]);
+const exhaustedInput = await exhaustedInputDelivery.method("agent-crew.dispatch", issue);
+assert.equal(exhaustedInput.value.job.status, "waiting", "Delivery exhaustion must preserve the waiting workflow state.");
+assert.equal(exhaustedInput.value.job.slackThread.input.status, "failed");
+assert.equal(exhaustedInput.value.job.slackThread.deliveries.find(delivery => delivery.kind === "input").attempts, 4);
+assert.equal(exhaustedInputDelivery.slackMessages.length, 8, "Initial delivery plus three retries is the maximum.");
+const interruptedDelivery = structuredClone(exhaustedInputDelivery.session());
+const deliveryRestart = harness(interruptedDelivery, false, {}, slackConfig);
+const interruptedJob = interruptedDelivery.pluginExtensions[0].value;
+const inputOperation = interruptedJob.slackThread.deliveries.find(delivery => delivery.kind === "input");
+inputOperation.attempts = 2;
+inputOperation.status = "sending";
+interruptedJob.slackThread.input.status = "sending";
+assert.equal((await deliveryRestart.method("agent-crew.slack.delivery.retry", { ...issue, operationId: inputOperation.operationId })).ok, true,
+  "A retained uncertain delivery can be retried without dispatching coding again.");
+assert.equal(deliveryRestart.calls.some(call => call.method === "tools.invoke"), false);
 const failedThread = harness(null, false, {}, slackConfig);
 failedThread.failSlackMessageAt(1);
 const failedCreation = await failedThread.method("agent-crew.dispatch", issue);
@@ -891,12 +1009,20 @@ for (const stage of ["root", "sent"]) {
   assert.equal(lost.value.job.status, stage === "root" ? "needs-inspection" : "waiting");
   assert.equal(stage === "root" ? lost.value.job.slackThread.status : lost.value.job.slackThread.input.status,
     stage === "root" ? "creating" : "sending");
-  await lostAck.method("agent-crew.dispatch", issue);
-  assert.equal(lostAck.slackMessages.length, stage === "root" ? 1 : 2, "Do not replay acknowledged sends after metadata failure");
+  if (stage === "sent") {
+    const delivery = lost.value.job.slackThread.deliveries.find(item => item.kind === "input");
+    assert.equal(delivery.attempts, 1);
+    assert.equal((await lostAck.method("agent-crew.slack.delivery.retry", { ...issue, operationId: delivery.operationId })).ok, true,
+      "An unacknowledged send can be retried from retained state without re-running coding.");
+    assert.equal(lostAck.slackMessages.length, 6, "Uncertain retry may duplicate the input message once.");
+  } else {
+    await lostAck.method("agent-crew.dispatch", issue);
+    assert.equal(lostAck.slackMessages.length, 1, "Duplicate discovery must not replay uncertain root creation.");
+  }
 }
 
-const slackEvent = { channel: "slack", content: "Use the smaller change", senderId: "U123", messageId: "100.000003" };
-const slackContext = { channelId: "slack", accountId: "default", senderId: "U123", messageId: "100.000003",
+const slackEvent = { channel: "slack", content: "Use the smaller change", senderId: "U123", messageId: "100.000006" };
+const slackContext = { channelId: "slack", accountId: "default", senderId: "U123", messageId: "100.000006",
   sessionKey: "agent:main:slack:channel:c123:thread:100.000001" };
 const inboundSnapshot = structuredClone(slackWait.session());
 const inbound = harness(inboundSnapshot, false, {}, slackConfig);
@@ -905,8 +1031,8 @@ inbound.holdRun();
 const claimed = await inbound.inbound(slackEvent, slackContext);
 assert.equal(claimed.handled, true);
 assert.equal(inbound.session().pluginExtensions[0].value.status, "starting");
-assert.equal(inbound.session().pluginExtensions[0].value.slackThread.acceptedReplyTs, "100.000003");
-const secondReply = await inbound.inbound({ ...slackEvent, messageId: "100.000004" }, { ...slackContext, messageId: "100.000004" });
+assert.equal(inbound.session().pluginExtensions[0].value.slackThread.acceptedReplyTs, "100.000006");
+const secondReply = await inbound.inbound({ ...slackEvent, messageId: "100.000007" }, { ...slackContext, messageId: "100.000007" });
 assert.match(secondReply.text, /busy/);
 inbound.releaseRun();
 await new Promise(resolve => setTimeout(resolve, 0));

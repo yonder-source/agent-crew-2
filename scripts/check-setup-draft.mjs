@@ -7,7 +7,7 @@ const draft = {
   githubAppId: "1234", repository: "fixture/repository",
   repositoryPath: "/workspaces/repositories/fixture/repository", codingAgentId: "coding",
   designerAgentId: "", codingChannelId: "C123", designerChannelId: "",
-  codingUserIds: "U123", designerUserIds: "", tokenBudget: "10000",
+  codingUserIds: "U123", designerUserIds: "", pollIntervalMs: "30000", tokenBudget: "10000",
 };
 
 function call(method, params = {}) {

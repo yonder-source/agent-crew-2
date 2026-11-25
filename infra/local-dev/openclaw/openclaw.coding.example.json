@@ -31,6 +31,15 @@
           "github": {
             "repository": "owner/repo"
           },
+          "slack": {
+            "coding": {
+              "agentId": "coding",
+              "channelId": "C0123456789",
+              "userIds": [
+                "U0123456789"
+              ]
+            }
+          },
           "coding": {
             "agentId": "coding",
             "repositoryPath": "/workspaces/repositories/owner/repo"
